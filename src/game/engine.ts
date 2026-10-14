@@ -1,288 +1,270 @@
-import { GameState, PlayerState, BallState, Team } from '../game/state';
-import { AntiCheat } from '../security/anti-cheat';
+import { GameState, PlayerState, BallState, Team } from './state';
+import { AntiCheat } from '../security/anti-cheat-v2';
 
 /**
- * GameEngine — Server-authoritative physics & game logic
- * Node (Backend) — KIXoff
- * 
- * Tick rate: 60Hz (16.67ms per tick)
- * Broadcast rate: 20Hz (50ms per snapshot)
+ * InputPacket — sent by client each frame
  */
-
-const TICK_RATE = 60;
-const TICK_MS = 1000 / TICK_RATE;
-const BROADCAST_RATE = 20;
-const BROADCAST_MS = 1000 / BROADCAST_RATE;
-const MATCH_DURATION_MS = 180_000; // 3 minutes
-const FIELD_WIDTH = 800;
-const FIELD_HEIGHT = 500;
-const GOAL_WIDTH = 120;
-const PLAYER_RADIUS = 18;
-const BALL_RADIUS = 12;
-const PLAYER_SPEED = 250; // px/sec
-const BALL_FRICTION = 0.98;
-const KICK_FORCE = 400;
-
 export interface InputPacket {
-  playerId: string;
   seq: number;
-  dx: number; // -1, 0, 1
-  dy: number; // -1, 0, 1
-  kick: boolean;
+  dx: number;
+  dy: number;
+  action: string;
   timestamp: number;
 }
 
-export interface SnapshotPacket {
+/**
+ * MatchSnapshot — broadcast to clients at 20Hz
+ */
+export interface MatchSnapshot {
   tick: number;
   timestamp: number;
   ball: BallState;
   players: PlayerState[];
-  score: { home: number; away: number };
+  scoreHome: number;
+  scoreAway: number;
+  phase: string;
   timeRemaining: number;
-  state: GameState['phase'];
 }
 
+/**
+ * GameEngine — Server-authoritative game loop
+ * Node (Backend) — KIXoff
+ *
+ * 60Hz tick: physics, collision, goal detection
+ * 20Hz snapshot: broadcast compact state to clients
+ */
 export class GameEngine {
   private state: GameState;
-  private inputs: Map<string, InputPacket[]> = new Map();
-  private tick: number = 0;
-  private lastBroadcast: number = 0;
+  private roomId: string;
+  private tickCount: number = 0;
+  private inputQueue: Map<string, InputPacket[]> = new Map();
   private antiCheat: AntiCheat;
-  private onGoal: ((team: Team) => void) | null = null;
-  private onMatchEnd: ((finalScore: { home: number; away: number }) => void) | null = null;
-  private intervalHandle: NodeJS.Timeout | null = null;
+  private matchDurationMs: number = 180000; // 3 minutes
+  private matchStartTime: number = 0;
+  private phase: string = 'WAITING';
 
-  constructor(matchId: string) {
-    this.state = this.createInitialState(matchId);
+  // Arena dimensions (top-down pitch)
+  private readonly ARENA_WIDTH = 800;
+  private readonly ARENA_HEIGHT = 500;
+  private readonly GOAL_WIDTH = 140;
+  private readonly PLAYER_RADIUS = 16;
+  private readonly BALL_RADIUS = 10;
+  private readonly MAX_PLAYER_SPEED = 280; // px/s
+  private readonly MAX_BALL_SPEED = 520; // px/s
+  private readonly FRICTION = 0.92;
+  private readonly KICK_FORCE = 380;
+
+  constructor(roomId: string) {
+    this.roomId = roomId;
     this.antiCheat = new AntiCheat();
+    this.state = {
+      players: [],
+      ball: {
+        x: this.ARENA_WIDTH / 2,
+        y: this.ARENA_HEIGHT / 2,
+        vx: 0,
+        vy: 0,
+        z: 0,
+      },
+      scoreHome: 0,
+      scoreAway: 0,
+      timeRemaining: this.matchDurationMs,
+      phase: 'WAITING',
+    };
   }
 
-  // ─── Lifecycle ───
-
-  start(): void {
-    if (this.intervalHandle) return;
-    this.state.phase = 'playing';
-    this.state.startTime = Date.now();
-    this.intervalHandle = setInterval(() => this.tickLoop(), TICK_MS);
-    console.log(`[Engine] Match ${this.state.matchId} started`);
-  }
-
-  stop(): void {
-    if (this.intervalHandle) {
-      clearInterval(this.intervalHandle);
-      this.intervalHandle = null;
-    }
-    this.state.phase = 'ended';
-    console.log(`[Engine] Match ${this.state.matchId} stopped`);
-  }
-
-  // ─── Player Management ───
-
+  /**
+   * Add a player to the match
+   */
   addPlayer(playerId: string, team: Team, name: string): void {
-    const spawnX = team === 'home' ? 150 : FIELD_WIDTH - 150;
- const spawnY = FIELD_HEIGHT / 2 + (this.state.players.filter(p => p.team === team).length * 40 - 40);
-
-    this.state.players.push({
+    const player: PlayerState = {
       id: playerId,
-      team,
       name,
-      x: spawnX,
-      y: spawnY,
+      team,
+      x: team === 'HOME' ? 200 : 600,
+      y: this.ARENA_HEIGHT / 2 + (Math.random() - 0.5) * 100,
       vx: 0,
       vy: 0,
       hasBall: false,
       stamina: 100,
-      rating: 1200,
-      seq: 0,
-    });
-    this.inputs.set(playerId, []);
+      isStunned: false,
+      stunTimer: 0,
+    };
+    this.state.players.push(player);
+    this.inputQueue.set(playerId, []);
+
+    // Start match when 6 players joined
+    if (this.state.players.length === 6 && this.phase === 'WAITING') {
+      this.phase = 'PLAYING';
+      this.state.phase = 'PLAYING';
+      this.matchStartTime = Date.now();
+    }
   }
 
+  /**
+   * Remove a player from the match
+   */
   removePlayer(playerId: string): void {
     this.state.players = this.state.players.filter(p => p.id !== playerId);
-    this.inputs.delete(playerId);
+    this.inputQueue.delete(playerId);
   }
 
-  // ─── Input Handling ───
-
-  queueInput(input: InputPacket): void {
-    // Sentinel: Validate input before processing
-    const validation = this.antiCheat.validateInput(input, this.state.players.find(p => p.id === input.playerId) || null);
-    if (!validation.valid) {
-      console.warn(`[AntiCheat] Rejected input from ${input.playerId}: ${validation.reason}`);
-      return;
-    }
-
-    const queue = this.inputs.get(input.playerId);
+  /**
+   * Queue input from a player (validated by AntiCheat before calling this)
+   */
+  processInput(playerId: string, input: InputPacket): void {
+    const queue = this.inputQueue.get(playerId);
     if (queue) {
       queue.push(input);
-      // Keep queue bounded
-      if (queue.length > 10) queue.shift();
     }
   }
 
-  // ─── Main Tick Loop (60Hz) ───
+  /**
+   * Main tick — called at 60Hz
+   * @param dt Delta time in seconds
+   */
+  tick(dt: number): void {
+    if (this.phase !== 'PLAYING') return;
 
-  private tickLoop(): void {
-    this.tick++;
-    const now = Date.now();
+    this.tickCount++;
 
-    // Check match time
-    const elapsed = now - (this.state.startTime || now);
-    this.state.timeRemaining = Math.max(0, MATCH_DURATION_MS - elapsed);
+    // Update match timer
+    const elapsed = Date.now() - this.matchStartTime;
+    this.state.timeRemaining = Math.max(0, this.matchDurationMs - elapsed);
 
     if (this.state.timeRemaining <= 0) {
-      this.handleMatchEnd();
+      this.phase = 'ENDED';
+      this.state.phase = 'ENDED';
       return;
     }
 
-    // Process inputs
-    this.processInputs();
-
-    // Physics: move players
-    this.updatePlayers();
-
-    // Physics: move ball
-    this.updateBall();
-
-    // Collisions
-    this.handleCollisions();
-
-    // Goal detection
-    this.checkGoals();
-
-    // Stamina regen
-    this.regenerateStamina();
-  }
-
-  private processInputs(): void {
-    for (const [playerId, queue] of this.inputs) {
+    // Process queued inputs
+    for (const [playerId, queue] of this.inputQueue) {
       const player = this.state.players.find(p => p.id === playerId);
       if (!player) continue;
 
       const input = queue.shift();
-      if (!input) continue;
+      if (input) {
+        // Apply movement
+        if (!player.isStunned) {
+          player.vx = input.dx * this.MAX_PLAYER_SPEED;
+          player.vy = input.dy * this.MAX_PLAYER_SPEED;
+        }
 
-      // Normalize diagonal movement
-      let dx = input.dx;
-      let dy = input.dy;
-      const mag = Math.sqrt(dx * dx + dy * dy);
-      if (mag > 0) {
-        dx /= mag;
-        dy /= mag;
-      }
-
-      player.vx = dx * PLAYER_SPEED;
-      player.vy = dy * PLAYER_SPEED;
-
-      // Kick ball if close enough
-      if (input.kick) {
-        const ballDx = this.state.ball.x - player.x;
-        const ballDy = this.state.ball.y - player.y;
-        const ballDist = Math.sqrt(ballDx * ballDx + ballDy * ballDy);
-
-        if (ballDist < PLAYER_RADIUS + BALL_RADIUS + 5) {
-          const kickAngle = Math.atan2(ballDy, ballDx);
-          this.state.ball.vx = Math.cos(kickAngle) * KICK_FORCE;
-          this.state.ball.vy = Math.sin(kickAngle) * KICK_FORCE;
-          player.hasBall = false;
+        // Handle actions (kick, sprint, slide)
+        if (input.action === 'kick') {
+          this.handleKick(player);
+        } else if (input.action === 'sprint') {
+          player.stamina = Math.max(0, player.stamina - 2);
+        } else if (input.action === 'slide') {
+          this.handleSlide(player);
         }
       }
 
-      player.seq = input.seq;
+      // Regenerate stamina when not sprinting
+      if (player.stamina < 100) {
+        player.stamina = Math.min(100, player.stamina + 0.5);
+      }
     }
-  }
 
-  private updatePlayers(): void {
-    const dt = TICK_MS / 1000;
-
+    // Physics: update positions
     for (const player of this.state.players) {
-      // Apply velocity
       player.x += player.vx * dt;
       player.y += player.vy * dt;
 
-      // Clamp to field boundaries
-      player.x = Math.max(PLAYER_RADIUS, Math.min(FIELD_WIDTH - PLAYER_RADIUS, player.x));
-      player.y = Math.max(PLAYER_RADIUS, Math.min(FIELD_HEIGHT - PLAYER_RADIUS, player.y));
+      // Apply friction
+      player.vx *= this.FRICTION;
+      player.vy *= this.FRICTION;
 
-      // Damping when no input
-      player.vx *= 0.85;
-      player.vy *= 0.85;
+      // Arena boundaries
+      player.x = Math.max(this.PLAYER_RADIUS, Math.min(this.ARENA_WIDTH - this.PLAYER_RADIUS, player.x));
+      player.y = Math.max(this.PLAYER_RADIUS, Math.min(this.ARENA_HEIGHT - this.PLAYER_RADIUS, player.y));
 
-      // Stamina drain on movement
-      const speed = Math.sqrt(player.vx ** 2 + player.vy ** 2);
-      if (speed > 10) {
-        player.stamina = Math.max(0, player.stamina - 0.15);
+      // Stun timer
+      if (player.isStunned) {
+        player.stunTimer -= dt * 1000;
+        if (player.stunTimer <= 0) {
+          player.isStunned = false;
+          player.stunTimer = 0;
+        }
       }
     }
-  }
 
-  private updateBall(): void {
-    const dt = TICK_MS / 1000;
+    // Ball physics
     const ball = this.state.ball;
-
-    // Apply velocity
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
+    ball.vx *= this.FRICTION;
+    ball.vy *= this.FRICTION;
 
-    // Friction
-    ball.vx *= BALL_FRICTION;
-    ball.vy *= BALL_FRICTION;
+    // Ball boundaries (with goal openings on left/right)
+    const goalTop = (this.ARENA_HEIGHT - this.GOAL_WIDTH) / 2;
+    const goalBottom = goalTop + this.GOAL_WIDTH;
 
-    // Stop if very slow
-    if (Math.abs(ball.vx) < 0.5) ball.vx = 0;
-    if (Math.abs(ball.vy) < 0.5) ball.vy = 0;
-
-    // Wall bounces (top & bottom)
-    if (ball.y < BALL_RADIUS) {
-      ball.y = BALL_RADIUS;
-      ball.vy = -ball.vy * 0.7;
-    }
-    if (ball.y > FIELD_HEIGHT - BALL_RADIUS) {
-      ball.y = FIELD_HEIGHT - BALL_RADIUS;
-      ball.vy = -ball.vy * 0.7;
-    }
-
-    // Wall bounces (left & right, except goal area)
-    const inGoalArea = ball.y > (FIELD_HEIGHT - GOAL_WIDTH) / 2 && ball.y < (FIELD_HEIGHT + GOAL_WIDTH) / 2;
-
-    if (ball.x < BALL_RADIUS && !inGoalArea) {
-      ball.x = BALL_RADIUS;
-      ball.vx = -ball.vx * 0.7;
-    }
-    if (ball.x > FIELD_WIDTH - BALL_RADIUS && !inGoalArea) {
-      ball.x = FIELD_WIDTH - BALL_RADIUS;
-      ball.vx = -ball.vx * 0.7;
-    }
-  }
-
-  private handleCollisions(): void {
-    // Player-ball collision
-    for (const player of this.state.players) {
-      const dx = this.state.ball.x - player.x;
-      const dy = this.state.ball.y - player.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const minDist = PLAYER_RADIUS + BALL_RADIUS;
-
-      if (dist < minDist && dist > 0) {
-        // Push ball away from player
-        const angle = Math.atan2(dy, dx);
-        this.state.ball.x = player.x + Math.cos(angle) * minDist;
-        this.state.ball.y = player.y + Math.sin(angle) * minDist;
-
-        // Transfer some velocity
-        const playerSpeed = Math.sqrt(player.vx ** 2 + player.vy ** 2);
-        this.state.ball.vx += Math.cos(angle) * playerSpeed * 0.5;
-        this.state.ball.vy += Math.sin(angle) * playerSpeed * 0.5;
-
-        // Mark possession
-        player.hasBall = true;
-        const otherPlayers = this.state.players.filter(p => p.id !== player.id);
-        otherPlayers.forEach(p => p.hasBall = false);
+    // Left wall (HOME goal)
+    if (ball.x < this.BALL_RADIUS) {
+      if (ball.y > goalTop && ball.y < goalBottom) {
+        // GOAL for AWAY
+        this.state.scoreAway++;
+        this.resetPositions();
+        return;
+      } else {
+        ball.x = this.BALL_RADIUS;
+        ball.vx = -ball.vx * 0.7;
       }
     }
 
-    // Player-player collision (simple separation)
+    // Right wall (AWAY goal)
+    if (ball.x > this.ARENA_WIDTH - this.BALL_RADIUS) {
+      if (ball.y > goalTop && ball.y < goalBottom) {
+        // GOAL for HOME
+        this.state.scoreHome++;
+        this.resetPositions();
+        return;
+      } else {
+        ball.x = this.ARENA_WIDTH - this.BALL_RADIUS;
+        ball.vx = -ball.vx * 0.7;
+      }
+    }
+
+    // Top/bottom walls
+    if (ball.y < this.BALL_RADIUS) {
+      ball.y = this.BALL_RADIUS;
+      ball.vy = -ball.vy * 0.7;
+    }
+    if (ball.y > this.ARENA_HEIGHT - this.BALL_RADIUS) {
+      ball.y = this.ARENA_HEIGHT - this.BALL_RADIUS;
+      ball.vy = -ball.vy * 0.7;
+    }
+
+    // Player-ball collision
+    for (const player of this.state.players) {
+      const dx = ball.x - player.x;
+      const dy = ball.y - player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const minDist = this.PLAYER_RADIUS + this.BALL_RADIUS;
+
+      if (dist < minDist) {
+        // Push ball away from player
+        const angle = Math.atan2(dy, dx);
+        const speed = Math.sqrt(player.vx * player.vx + player.vy * player.vy);
+        ball.vx = Math.cos(angle) * Math.max(speed * 1.5, 150);
+        ball.vy = Math.sin(angle) * Math.max(speed * 1.5, 150);
+
+        // Cap ball speed
+        const ballSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+        if (ballSpeed > this.MAX_BALL_SPEED) {
+          ball.vx = (ball.vx / ballSpeed) * this.MAX_BALL_SPEED;
+          ball.vy = (ball.vy / ballSpeed) * this.MAX_BALL_SPEED;
+        }
+
+        // Mark possession
+        this.state.players.forEach(p => p.hasBall = false);
+        player.hasBall = true;
+      }
+    }
+
+    // Player-player collision (simple push apart)
     for (let i = 0; i < this.state.players.length; i++) {
       for (let j = i + 1; j < this.state.players.length; j++) {
         const a = this.state.players[i];
@@ -290,138 +272,107 @@ export class GameEngine {
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const minDist = PLAYER_RADIUS * 2;
+        const minDist = this.PLAYER_RADIUS * 2;
 
         if (dist < minDist && dist > 0) {
-          const overlap = (minDist - dist) / 2;
-          const angle = Math.atan2(dy, dx);
-          a.x -= Math.cos(angle) * overlap;
-          a.y -= Math.sin(angle) * overlap;
-          b.x += Math.cos(angle) * overlap;
-          b.y += Math.sin(angle) * overlap;
+          const push = (minDist - dist) / 2;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          a.x -= nx * push;
+          a.y -= ny * push;
+          b.x += nx * push;
+          b.y += ny * push;
         }
       }
     }
   }
 
-  private checkGoals(): void {
+  /**
+   * Handle kick action
+   */
+  private handleKick(player: PlayerState): void {
     const ball = this.state.ball;
- const goalTop = (FIELD_HEIGHT - GOAL_WIDTH) / 2;
-    const goalBottom = (FIELD_HEIGHT + GOAL_WIDTH) / 2;
+    const dx = ball.x - player.x;
+    const dy = ball.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
 
-    // Home goal (left side) — away scores
-    if (ball.x <= BALL_RADIUS && ball.y > goalTop && ball.y < goalBottom) {
-      this.state.score.away++;
-      this.onGoal?.('away');
-      this.resetPositions();
-    }
-
-    // Away goal (right side) — home scores
-    if (ball.x >= FIELD_WIDTH - BALL_RADIUS && ball.y > goalTop && ball.y < goalBottom) {
-      this.state.score.home++;
-      this.onGoal?.('home');
-      this.resetPositions();
-    }
-  }
-
-  private resetPositions(): void {
-    // Reset ball to center
-    this.state.ball.x = FIELD_WIDTH / 2;
-    this.state.ball.y = FIELD_HEIGHT / 2;
-    this.state.ball.vx = 0;
-    this.state.ball.vy = 0;
-
-    // Reset players to spawn positions
-    let homeIdx = 0;
-    let awayIdx = 0;
-    for (const player of this.state.players) {
-      if (player.team === 'home') {
-        player.x = 150;
-        player.y = FIELD_HEIGHT / 2 + (homeIdx * 40 - 40);
-        homeIdx++;
-      } else {
-        player.x = FIELD_WIDTH - 150;
-        player.y = FIELD_HEIGHT / 2 + (awayIdx * 40 - 40);
-        awayIdx++;
-      }
-      player.vx = 0;
-      player.vy = 0;
+    if (dist < this.PLAYER_RADIUS + this.BALL_RADIUS + 8) {
+      const angle = Math.atan2(dy, dx);
+      ball.vx = Math.cos(angle) * this.KICK_FORCE;
+      ball.vy = Math.sin(angle) * this.KICK_FORCE;
       player.hasBall = false;
     }
   }
 
-  private regenerateStamina(): void {
-    for (const player of this.state.players) {
-      const speed = Math.sqrt(player.vx ** 2 + player.vy ** 2);
-      if (speed < 10) {
-        player.stamina = Math.min(100, player.stamina + 0.3);
+  /**
+   * Handle slide action (stuns nearby opponents)
+   */
+  private handleSlide(player: PlayerState): void {
+    for (const other of this.state.players) {
+      if (other.team === player.team) continue;
+      const dx = other.x - player.x;
+      const dy = other.y - player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < this.PLAYER_RADIUS * 3) {
+        other.isStunned = true;
+        other.stunTimer = 800; // 800ms stun
+        other.vx = dx * 2;
+        other.vy = dy * 2;
       }
     }
+    player.stamina = Math.max(0, player.stamina - 15);
   }
 
-  private handleMatchEnd(): void {
-    this.stop();
-    this.onMatchEnd?.(this.state.score);
-  }
+  /**
+   * Reset positions after goal
+   */
+  private resetPositions(): void {
+    this.state.ball = {
+      x: this.ARENA_WIDTH / 2,
+      y: this.ARENA_HEIGHT / 2,
+      vx: 0,
+      vy: 0,
+      z: 0,
+    };
 
-  // ─── Snapshot / Broadcast ───
-
-  shouldBroadcast(): boolean {
-    const now = Date.now();
-    if (now - this.lastBroadcast >= BROADCAST_MS) {
-      this.lastBroadcast = now;
-      return true;
+    for (const player of this.state.players) {
+      player.x = player.team === 'HOME' ? 200 : 600;
+      player.y = this.ARENA_HEIGHT / 2 + (Math.random() - 0.5) * 100;
+      player.vx = 0;
+      player.vy = 0;
+      player.hasBall = false;
+      player.isStunned = false;
+      player.stunTimer = 0;
     }
-    return false;
   }
 
-  getSnapshot(): SnapshotPacket {
+  /**
+   * Get current snapshot for broadcasting
+   */
+  getSnapshot(): MatchSnapshot {
     return {
-      tick: this.tick,
+      tick: this.tickCount,
       timestamp: Date.now(),
       ball: { ...this.state.ball },
       players: this.state.players.map(p => ({ ...p })),
-      score: { ...this.state.score },
+      scoreHome: this.state.scoreHome,
+      scoreAway: this.state.scoreAway,
+      phase: this.phase,
       timeRemaining: this.state.timeRemaining,
-      state: this.state.phase,
     };
   }
 
-  // ─── Callbacks ───
-
-  onGoalScored(cb: (team: Team) => void): void {
-    this.onGoal = cb;
-  }
-
-  onMatchComplete(cb: (finalScore: { home: number; away: number }) => void): void {
-    this.onMatchEnd = cb;
-  }
-
-  // ─── Helpers ───
-
-  private createInitialState(matchId: string): GameState {
-    return {
-      matchId,
-      phase: 'waiting',
-      players: [],
-      ball: {
-        x: FIELD_WIDTH / 2,
-        y: FIELD_HEIGHT / 2,
-        vx: 0,
-        vy: 0,
-        lastTouch: null,
-      },
-      score: { home: 0, away: 0 },
-      timeRemaining: MATCH_DURATION_MS,
-      startTime: null,
-    };
-  }
-
-  getGameState(): GameState {
+  /**
+   * Get full game state
+   */
+  getState(): GameState {
     return this.state;
   }
 
-  getFieldDimensions() {
-    return { width: FIELD_WIDTH, height: FIELD_HEIGHT, goalWidth: GOAL_WIDTH };
+  /**
+   * Get room ID
+   */
+  getRoomId(): string {
+    return this.roomId;
   }
 }
