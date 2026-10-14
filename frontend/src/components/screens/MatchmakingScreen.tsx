@@ -1,74 +1,45 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { colors, fonts, spacing, radii } from '../../styles/tokens';
+import { MenuButton } from '../ui/MenuButton';
 
-interface MatchmakingScreenProps {
+interface Props {
+  status: 'searching' | 'found' | 'cancelled' | 'error';
+  playersFound?: number;
+  totalPlayers?: number;
+  estimatedWait?: number;
   onMatchFound: (matchId: string) => void;
   onCancel: () => void;
 }
 
-export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ onMatchFound, onCancel }) => {
-  const [elapsed, setElapsed] = useState(0);
-  const [playersFound, setPlayersFound] = useState(1);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setElapsed((e) => e + 1);
-      setPlayersFound((p) => Math.min(p + Math.random() > 0.7 ? 1 : 0, 6));
-    }, 1000);
-    return () => clearInterval(timer);
+export const MatchmakingScreen: React.FC<Props> = ({ status, playersFound = 0, totalPlayers = 6, estimatedWait = 0, onMatchFound, onCancel }) => {
+  const [dots, setDots] = useState('');
+  React.useEffect(() => {
+    const i = setInterval(() => setDots(d => d.length >= 3 ? '' : d + '.'), 500);
+    return () => clearInterval(i);
   }, []);
 
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, '0')}`;
-  };
-
   return (
-    <div style={{
-      minHeight: '100vh', background: colors.base, display: 'flex',
-      flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      fontFamily: fonts.body, color: colors.textPrimary, gap: spacing.xl,
-    }}>
-      <motion.div
-        animate={{ rotate: 360 }}
-        transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-        style={{
-          width: '80px', height: '80px',
-          border: `4px solid ${colors.surfaceHi}`,
-          borderTopColor: colors.accent,
-          borderRadius: '50%',
-        }}
-      />
-      <div style={{ textAlign: 'center' }}>
-        <h2 style={{ fontFamily: fonts.heading, fontSize: '2rem', color: colors.accent, margin: 0 }}>
-          Searching for Match
-        </h2>
-        <p style={{ color: colors.textSecondary, marginTop: spacing.sm }}>
-          {playersFound}/6 players found · {formatTime(elapsed)}
-        </p>
-      </div>
-      <div style={{ display: 'flex', gap: spacing.md }}>
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} style={{
-            width: '40px', height: '40px', borderRadius: '50%',
-            background: i < playersFound ? colors.accent : colors.surfaceAlt,
-            border: `2px solid ${i < playersFound ? colors.accent : colors.surfaceHi}`,
-            boxShadow: i < playersFound ? `0 0 12px ${colors.accent}80` : 'none',
-            transition: 'all 300ms ease',
-          }} />
-        ))}
-      </div>
-      <button
-        onClick={onCancel}
-        style={{
-          fontFamily: fonts.heading, fontSize: '1rem',
-          padding: `${spacing.sm} ${spacing.xl}`, borderRadius: radii.md,
-          background: 'transparent', color: colors.danger,
-          border: `1px solid ${colors.danger}`, cursor: 'pointer',
-        }}
-      >Cancel</button>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: colors.base, fontFamily: fonts.body, gap: spacing.xl }}>
+      <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+        style={{ width: 80, height: 80, borderRadius: '50%', border: `4px solid ${colors.surfaceHi}`, borderTopColor: colors.accent }} />
+      <h1 style={{ fontFamily: fonts.heading, fontSize: '2rem', color: colors.textPrimary, letterSpacing: '0.1em' }}>
+        {status === 'searching' ? `Searching${dots}` : status === 'found' ? 'Match Found!' : status === 'error' ? 'Error' : 'Cancelled'}
+      </h1>
+      {status === 'searching' && (
+        <>
+          <p style={{ color: colors.textSecondary, fontSize: '1rem' }}>{playersFound}/{totalPlayers} players found</p>
+          {estimatedWait > 0 && <p style={{ color: colors.textMuted, fontSize: '0.875rem' }}>Est. wait: {estimatedWait}s</p>}
+          <MenuButton label="Cancel" variant="danger" onClick={onCancel} />
+        </>
+      )}
+      {status === 'found' && (
+        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring' }}
+          style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: spacing.md }}>
+          <p style={{ color: colors.success, fontSize: '1.25rem' }}>All 6 players ready!</p>
+          <MenuButton label="Enter Arena" onClick={() => onMatchFound('')} />
+        </motion.div>
+      )}
     </div>
   );
 };

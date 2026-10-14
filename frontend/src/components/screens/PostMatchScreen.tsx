@@ -1,78 +1,52 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { colors, fonts, spacing, radii } from '../../styles/tokens';
+import { MenuButton } from '../ui/MenuButton';
 
-interface PostMatchProps {
+interface Props {
   result: 'win' | 'loss' | 'draw';
   scoreHome: number;
   scoreAway: number;
   ratingChange: number;
   kreditsEarned: number;
-  stats: { goals: number; assists: number; saves: number; passes: number };
-  onContinue: () => void;
+  goals: number;
+  assists: number;
+  onPlayAgain: () => void;
+  onMainMenu: () => void;
 }
 
-export const PostMatchScreen: React.FC<PostMatchProps> = ({
-  result, scoreHome, scoreAway, ratingChange, kreditsEarned, stats, onContinue,
-}) => {
-  const resultColor = result === 'win' ? colors.success : result === 'loss' ? colors.danger : colors.warning;
+export const PostMatchScreen: React.FC<Props> = ({ result, scoreHome, scoreAway, ratingChange, kreditsEarned, goals, assists, onPlayAgain, onMainMenu }) => {
   const resultText = result === 'win' ? 'VICTORY' : result === 'loss' ? 'DEFEAT' : 'DRAW';
+  const resultColor = result === 'win' ? colors.success : result === 'loss' ? colors.danger : colors.warning;
 
   return (
-    <div style={{
-      minHeight: '100vh', background: colors.base,
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', padding: spacing.xl, gap: spacing.lg,
-    }}>
-      <motion.h1
-        initial={{ scale: 0, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ delay: 0.2, type: 'spring' }}
-        style={{
-          fontFamily: fonts.heading, fontSize: '4rem', fontWeight: 900,
-          color: resultColor, textShadow: `0 0 30px ${resultColor}`,
-          margin: 0,
-        }}
-      >{resultText}</motion.h1>
-
-      <div style={{ fontFamily: fonts.heading, fontSize: '2rem', color: colors.textPrimary }}>
-        {scoreHome} - {scoreAway}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: colors.base, fontFamily: fonts.body, gap: spacing.lg }}>
+      <motion.h1 initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+        style={{ fontFamily: fonts.heading, fontSize: '3.5rem', color: resultColor, letterSpacing: '0.15em', textShadow: `0 0 30px ${resultColor}` }}>
+        {resultText}
+      </motion.h1>
+      <div style={{ display: 'flex', gap: spacing.xl, alignItems: 'center' }}>
+        <span style={{ color: colors.teamHome, fontSize: '3rem', fontWeight: 800, fontFamily: fonts.heading }}>{scoreHome}</span>
+        <span style={{ color: colors.textMuted, fontSize: '2rem' }}>-</span>
+        <span style={{ color: colors.teamAway, fontSize: '3rem', fontWeight: 800, fontFamily: fonts.heading }}>{scoreAway}</span>
       </div>
-
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: spacing.md,
-        width: '400px',
-      }}>
-        {[
-          { label: 'Rating', value: `${ratingChange > 0 ? '+' : ''}${ratingChange}`, color: ratingChange >= 0 ? colors.success : colors.danger },
-          { label: 'Kredits', value: `+${kreditsEarned}`, color: colors.warning },
-          { label: 'Goals', value: stats.goals, color: colors.accent },
-          { label: 'Assists', value: stats.assists, color: colors.accent },
-          { label: 'Saves', value: stats.saves, color: colors.highlight },
-          { label: 'Passes', value: stats.passes, color: colors.textSecondary },
-        ].map((stat) => (
-          <div key={stat.label} style={{
-            background: colors.surfaceAlt, borderRadius: radii.md,
-            padding: spacing.md, textAlign: 'center',
-          }}>
-            <div style={{ color: colors.textMuted, fontSize: '0.75rem', fontFamily: fonts.body }}>{stat.label}</div>
-            <div style={{ color: stat.color, fontSize: '1.5rem', fontWeight: 700, fontFamily: fonts.heading }}>{stat.value}</div>
-          </div>
-        ))}
+      <div style={{ display: 'flex', gap: spacing.xl, background: colors.surface, borderRadius: radii.lg, padding: spacing.lg }}>
+        <Stat label="Rating" value={`${ratingChange >= 0 ? '+' : ''}${ratingChange}`} color={ratingChange >= 0 ? colors.success : colors.danger} />
+        <Stat label="Kredits" value={`+${kreditsEarned}`} color={colors.warning} />
+        <Stat label="Goals" value={String(goals)} color={colors.accent} />
+        <Stat label="Assists" value={String(assists)} color={colors.highlight} />
       </div>
-
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={onContinue}
-        style={{
-          padding: `${spacing.md} ${spacing.xxl}`, marginTop: spacing.lg,
-          background: `linear-gradient(135deg, ${colors.accent}, ${colors.highlight})`,
-          border: 'none', borderRadius: radii.md, cursor: 'pointer',
-          fontFamily: fonts.heading, fontSize: '1.25rem', fontWeight: 700,
-          color: colors.base,
-        }}
-      >CONTINUE</motion.button>
+      <div style={{ display: 'flex', gap: spacing.md }}>
+        <MenuButton label="Play Again" onClick={onPlayAgain} />
+        <MenuButton label="Main Menu" variant="secondary" onClick={onMainMenu} />
+      </div>
     </div>
   );
 };
+
+const Stat: React.FC<{ label: string; value: string; color: string }> = ({ label, value, color }) => (
+  <div style={{ textAlign: 'center' }}>
+    <div style={{ color: colors.textMuted, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>{label}</div>
+    <div style={{ color, fontSize: '1.5rem', fontWeight: 700, fontFamily: fonts.heading }}>{value}</div>
+  </div>
+);
