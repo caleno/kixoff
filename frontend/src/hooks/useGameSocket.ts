@@ -16,65 +16,67 @@ export interface ServerSnapshot {
   }>;
   score: { home: number; away: number };
   timeRemaining: number;
-  state: string;
+  phase: string;
 }
 
-export interface InputState {
-  dx: number;
-  dy: number;
-  kick: boolean;
-}
-
-export function useGameSocket(matchId: string) {
+export function useGameSocket() {
   const socketRef = useRef<Socket | null>(null);
-  const inputSeq = useRef(0);
 
   useEffect(() => {
-    const socket = io(`${SERVER_URL}/match`, {
-      query: { matchId },
+    const socket = io(SERVER_URL, {
       transports: ['websocket'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: 5,
     });
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('[Socket] Connected to match', matchId);
+      console.log('[Socket] Connected to game server');
     });
 
-    socket.on('disconnect', () => {
-      console.warn('[Socket] Disconnected from match');
-    });
-
-    socket.on('error', (err: string) => {
-      console.error('[Socket] Error:', err);
+    socket.on('disconnect', (reason) => {
+      console.warn('[Socket] Disconnected:', reason);
     });
 
     return () => {
       socket.disconnect();
-      socketRef.current = null;
     };
-  }, [matchId]);
+  }, []);
 
-  const sendInput = useCallback((input: InputState) => {
-    if (!socketRef.current?.connected) return;
-    inputSeq.current++;
-    socketRef.current.emit('input', {
-      seq: inputSeq.current,
-      dx: input.dx,
-      dy: input.dy,
-      kick: input.kick,
+  const sendInput = useCallback((input: {
+    dx: number;
+    dy: number;
+    kick: boolean;
+  }) => {
+    socketRef.current?.emit('player:input', {
+      ...input,
       timestamp: Date.now(),
     });
   }, []);
 
   const onSnapshot = useCallback((cb: (snapshot: ServerSnapshot) => void) => {
     if (!socketRef.current) return;
-    socketRef.current.on('snapshot', cb);
+    socketRef.current.on('game:snapshot', cb);
   }, []);
 
-  const onMatchEnd = useCallback((cb: (result: any) => void) => {
+  const onGoal = useCallback((cb: (team: 'home' | 'away') => void) => {
     if (!socketRef.current) return;
-    socketRef.current.on('match:end', cb);
+    socketRef.current.on('game:goal', cb);
   }, []);
 
-  return { sendInput, onSnapshot, onMatchEnd };
+  const onMatchEnd = useCallback((cb: (result: { score: { home: number; away: number } }) => void) => {
+    if (!socketRef.current) return;
+    socketRef.current.on('game:end', cb);
+  }, []);
+
+  const joinQueue = useCallback(() => {
+    socketRef.current?.emit('matchmaking:join');
+  }, []);
+
+  const leaveQueue = useCallback(() => {
+    socketRef.current?.emit('matchmaking:leave');
+  }, []);
+
+  return { sendInput, onSnapshot, onGoal, onMatchEnd, joinQueue, leaveQueue, socket: socketRef };
 }

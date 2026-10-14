@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 
 export interface KeyState {
   up: boolean;
@@ -8,48 +8,49 @@ export interface KeyState {
   kick: boolean;
 }
 
-const defaultKeys: KeyState = {
-  up: false, down: false, left: false, right: false, kick: false,
+const defaultState: KeyState = {
+  up: false,
+  down: false,
+  left: false,
+  right: false,
+  kick: false,
+};
+
+const keyMap: Record<string, keyof KeyState> = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  KeyW: 'up',
+  KeyS: 'down',
+  KeyA: 'left',
+  KeyD: 'right',
+  Space: 'kick',
 };
 
 export function useKeyboardInput() {
-  const [keys, setKeys] = useState<KeyState>(defaultKeys);
-  const keysRef = useRef(keys);
-  keysRef.current = keys;
+  const [keys, setKeys] = useState<KeyState>(defaultState);
 
   useEffect(() => {
     const handleDown = (e: KeyboardEvent) => {
-      switch (e.code) {
-        case 'KeyW': case 'ArrowUp':
-          setKeys(k => ({ ...k, up: true })); break;
-        case 'KeyS': case 'ArrowDown':
-          setKeys(k => ({ ...k, down: true })); break;
-        case 'KeyA': case 'ArrowLeft':
-          setKeys(k => ({ ...k, left: true })); break;
-        case 'KeyD': case 'ArrowRight':
-          setKeys(k => ({ ...k, right: true })); break;
-        case 'Space':
-          setKeys(k => ({ ...k, kick: true })); e.preventDefault(); break;
+      const key = keyMap[e.code];
+      if (key) {
+        e.preventDefault();
+        setKeys((prev) => ({ ...prev, [key]: true }));
       }
     };
 
     const handleUp = (e: KeyboardEvent) => {
-      switch (e.code) {
-        case 'KeyW': case 'ArrowUp':
-          setKeys(k => ({ ...k, up: false })); break;
-        case 'KeyS': case 'ArrowDown':
-          setKeys(k => ({ ...k, down: false })); break;
-        case 'KeyA': case 'ArrowLeft':
-          setKeys(k => ({ ...k, left: false })); break;
-        case 'KeyD': case 'ArrowRight':
-          setKeys(k => ({ ...k, right: false })); break;
-        case 'Space':
-          setKeys(k => ({ ...k, kick: false })); break;
+      const key = keyMap[e.code];
+      if (key) {
+        e.preventDefault();
+        setKeys((prev) => ({ ...prev, [key]: false }));
       }
     };
 
     window.addEventListener('keydown', handleDown);
     window.addEventListener('keyup', handleUp);
+
     return () => {
       window.removeEventListener('keydown', handleDown);
       window.removeEventListener('keyup', handleUp);
