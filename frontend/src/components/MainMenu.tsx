@@ -1,9 +1,5 @@
-import { colors, typography } from '../types/design';
-
-/**
- * MainMenu — Landing screen after boot
- * Aura (UI) — KIXoff
- */
+import React from 'react';
+import { motion } from 'framer-motion';
 
 interface MainMenuProps {
   onPlay: () => void;
@@ -11,111 +7,88 @@ interface MainMenuProps {
   onCareer: () => void;
   onSettings: () => void;
   playerName: string;
-  playerRating: number;
+  playerRank: string;
   currency: { kredits: number; gems: number };
 }
 
-export function MainMenu({ onPlay, onGarage, onCareer, onSettings, playerName, playerRating, currency }: MainMenuProps) {
+const buttonVariants = {
+  idle: { scale: 1, boxShadow: '0 0 20px rgba(0, 240, 255, 0.2)' },
+  hover: { scale: 1.05, boxShadow: '0 0 40px rgba(0, 240, 255, 0.5)' },
+  tap: { scale: 0.98 },
+};
+
+export const MainMenu: React.FC<MainMenuProps> = ({
+  onPlay, onGarage, onCareer, onSettings,
+  playerName, playerRank, currency
+}) => {
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: `radial-gradient(ellipse at center, ${colors.baseLight} 0%, ${colors.base} 100%)`,
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '32px',
-      fontFamily: typography.body,
-      color: colors.textPrimary,
-    }}>
+    <div className="min-h-screen bg-[#0A0E27] flex flex-col items-center justify-center gap-8">
       {/* Logo */}
-      <div style={{ textAlign: 'center' }}>
-        <h1 style={{
-          fontFamily: typography.heading,
-          fontSize: '72px',
-          fontWeight: 700,
-          letterSpacing: '4px',
-          background: `linear-gradient(90deg, ${colors.accent}, ${colors.highlight})`,
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          margin: 0,
-        }}>
-          KIXoff
+      <motion.div
+        initial={{ opacity: 0, y: -50 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, ease: 'easeOut' }}
+        className="text-center"
+      >
+        <h1 className="font-rajdhani text-7xl font-bold tracking-wider">
+          <span className="text-[#00F0FF]">KIX</span>
+          <span className="text-[#FF006E]">off</span>
         </h1>
-        <p style={{ color: colors.textSecondary, fontSize: '14px', letterSpacing: '2px', marginTop: '4px' }}>
-          NEON ARCADE FOOTBALL
-        </p>
-      </div>
+        <p className="text-white/50 font-inter text-sm tracking-widest mt-1">3v3 ARCADE KICKOFF</p>
+      </motion.div>
 
-      {/* Player card */}
-      <div style={{
-        background: colors.baseLight,
-        border: `1px solid ${colors.accent}30`,
-        borderRadius: '12px',
-        padding: '16px 32px',
-        display: 'flex',
-        gap: '24px',
-        alignItems: 'center',
-      }}>
+      {/* Player Card */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+        className="bg-white/5 border border-white/10 rounded-xl px-6 py-3 flex items-center gap-6"
+      >
         <div>
-          <div style={{ fontSize: '18px', fontWeight: 600 }}>{playerName}</div>
-          <div style={{ fontSize: '12px', color: colors.textSecondary }}>Rating: {playerRating}</div>
+          <p className="text-white font-inter font-semibold">{playerName}</p>
+          <p className="text-[#FFB800] font-rajdhani text-sm">{playerRank}</p>
         </div>
-        <div style={{ display: 'flex', gap: '16px' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: colors.warning }}>{currency.kredits}</div>
-            <div style={{ fontSize: '10px', color: colors.textMuted }}>KREDITS</div>
+        <div className="h-8 w-px bg-white/10" />
+        <div className="flex gap-4">
+          <div className="text-center">
+            <p className="text-[#00F0FF] font-rajdhani text-xl font-bold">{currency.kredits}</p>
+            <p className="text-white/40 text-xs">Kredits</p>
           </div>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: colors.accent }}>{currency.gems}</div>
-            <div style={{ fontSize: '10px', color: colors.textMuted }}>GEMS</div>
+          <div className="text-center">
+            <p className="text-[#FF006E] font-rajdhani text-xl font-bold">{currency.gems}</p>
+            <p className="text-white/40 text-xs">Gems</p>
           </div>
         </div>
-      </div>
+      </motion.div>
 
-      {/* Menu buttons */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '280px' }}>
-        <MenuButton label="PLAY" onClick={onPlay} primary />
-        <MenuButton label="GARAGE" onClick={onGarage} />
-        <MenuButton label="CAREER" onClick={onCareer} />
-        <MenuButton label="SETTINGS" onClick={onSettings} />
+      {/* Menu Buttons */}
+      <div className="flex flex-col gap-4 w-72">
+        {[
+          { label: 'PLAY', action: onPlay, primary: true },
+          { label: 'GARAGE', action: onGarage, primary: false },
+          { label: 'CAREER', action: onCareer, primary: false },
+          { label: 'SETTINGS', action: onSettings, primary: false },
+        ].map((btn, i) => (
+          <motion.button
+            key={btn.label}
+            initial={{ opacity: 0, x: -30 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.4 + i * 0.1 }}
+            variants={buttonVariants}
+            initial="idle"
+            whileHover="hover"
+            whileTap="tap"
+            onClick={btn.action}
+            className={`px-8 py-4 rounded-xl font-rajdhani text-2xl font-bold tracking-wider transition-colors ${
+              btn.primary
+                ? 'bg-[#00F0FF]/10 border-2 border-[#00F0FF] text-[#00F0FF]'
+                : 'bg-white/5 border-2 border-white/10 text-white hover:border-white/30'
+            }`}
+          >
+            {btn.label}
+          </motion.button>
+        ))}
       </div>
     </div>
   );
-}
-
-function MenuButton({ label, onClick, primary }: { label: string; onClick: () => void; primary?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: '14px 24px',
-        borderRadius: '8px',
-        border: 'none',
-        fontFamily: typography.heading,
-        fontSize: '20px',
-        fontWeight: 600,
-        letterSpacing: '2px',
-        cursor: 'pointer',
-        transition: 'all 0.2s ease',
-        background: primary
-          ? `linear-gradient(90deg, ${colors.accent}, ${colors.accentDim})`
-          : colors.baseLighter,
-        color: primary ? colors.base : colors.textPrimary,
-        boxShadow: primary ? `0 0 20px ${colors.accent}40` : 'none',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateY(-2px)';
-        e.currentTarget.style.boxShadow = primary
-          ? `0 4px 30px ${colors.accent}60`
-          : `0 4px 20px ${colors.base}80`;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = 'translateY(0)';
-        e.currentTarget.style.boxShadow = primary ? `0 0 20px ${colors.accent}40` : 'none';
-      }}
-    >
-      {label}
-    </button>
-  );
-}
+};
