@@ -2,44 +2,57 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { Snapshot, PlayerInput } from '../types';
 
-export function useGameSocket(serverUrl: string, token: string) {
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
+
+export function useGameSocket(matchId: string | null) {
   const socketRef = useRef<Socket | null>(null);
   const [connected, setConnected] = useState(false);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const inputSeq = useRef(0);
 
   useEffect(() => {
-    const socket = io(serverUrl, {
-      auth: { token },
+    if (!matchId) return;
+
+    const socket = io(SERVER_URL, {
       transports: ['websocket'],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+      auth: { token: localStorage.getItem('cloduron_token') },
     });
     socketRef.current = socket;
 
-    socket.on('connect', () => setConnected(true));
-   .socket.on('disconnect', () => setConnected(false));
-    socket.on('error', (err: string) => setError(err));
-    socket.on('snapshot', (snap: Snapshot) => setSnapshot(snap));
-    socket.on('match-ended', () => {
-      // Trigger results screen
+    socket.on('connect', () => {
+      setConnected(true);
+      socket.emit('join_match', { matchId });
     });
 
-    return () => { socket.disconnect(); };
-  }, [serverUrl, token]);
+    socket.on('disconnect', () => setConnected(false));
+    socket.on('connect_error', (err: Error) => setError(err.message));
 
-  const sendInput = useCallback((input: PlayerInput) => {
-    socketRef.current?.emit('input', input);
-  }, []);
+    socket.on('snapshot', (snap: Snapshot) => setSnapshot(snap));
+    socket.on('match_ended', () =>
+      setSnapshot((prev) => (prev ? { ...prev, phase: 'ended' } : null))
+    );
+    socket.on('error', (msg: string) => setError(msg));
 
-  const joinQueue = useCallback((mode: 'casual' | 'ranked') => {
-    socketRef.current?.emit('join-queue', { mode });
-  }, []);
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [matchId]);
 
-  const leaveQueue = useCallback(() => {
-    socketRef.current?.emit('leave-queue');
-  }, []);
+  const sendInput = useCallback(
+    (input: Omit<PlayerInput, 'seq' | 'timestamp'>) => {
+      const socket = socketRef.current;
+      if (!socket || !socket.connected) return;
+      const fullInput: PlayerInput = {
+        ...input,
+        seq: inputSeq.current++,
+        timestamp: Date.now(),
+      };
+      socket.emit('player_input', fullInput);
+    },
+    []
+  );
 
-  return { connected, snapshot, error, sendInput, joinQueue, leaveQueue };
+  return { connected, snapshot, error, sendInput };
 }
