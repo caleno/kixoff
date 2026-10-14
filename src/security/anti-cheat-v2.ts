@@ -1,151 +1,112 @@
-import { PlayerState, Team } from './state';
-import { InputPacket } from './engine';
+import { PlayerState, Team } from '../game/state';
+import { InputPacket } from '../game/engine';
 
 /**
  * AntiCheat — Server-side validation layer
  * Sentinel (Security) — KIXoff
  *
- * Validates all client inputs before they reach the game engine.
- * Detects: speed hacks, teleport, rate abuse, impossible inputs.
+ * Validates input packets for:
+ * - Sequence integrity (no replays, no gaps)
+ * - Rate limiting (max 35 inputs/sec)
+ * - Speed/teleport detection
+ * - Ban threshold (3 violations → kick)
  */
-
-const MAX_INPUT_RATE_MS = 30; // Minimum 30ms between inputs (~33Hz max)
-const MAX_SPEED = 300; // px/sec — must match engine PLAYER_SPEED + tolerance
-const MAX_TELEPORT_DIST = 50; // Max acceptable position delta per tick
-const MAX_SEQ_JUMP = 5; // Max acceptable sequence number jump
-
-interface ValidationResult {
-  valid: boolean;
-  reason?: string;
-}
-
-interface PlayerViolation {
-  playerId: string;
-  type: string;
-  count: number;
-  lastViolation: number;
-}
-
 export class AntiCheat {
-  private violations: Map<string, PlayerViolation> = new Map();
-  private lastInputTime: Map<string, number> = new Map();
   private lastSeq: Map<string, number> = new Map();
-  private banThreshold: number = 5;
+  private lastInputTime: Map<string, number> = new Map();
+  private violations: Map<string, number> = new Map();
+  private banned: Set<string> = new Set();
+  private lastPosition: Map<string, { x: number; y: number; t: number }> = new Map();
+
+  private readonly MAX_INPUT_RATE = 35; // per second
+  private readonly MAX_SPEED = 250; // units/sec (server max is 200)
+  private readonly SPEED_TOLERANCE = 1.5;
+  private readonly BAN_THRESHOLD = 3;
+  private readonly MIN_INPUT_INTERVAL = 1000 / this.MAX_INPUT_RATE;
 
   /**
-   * Validate an incoming input packet
+   * Validate an input packet against the player's history
    */
-  validateInput(input: InputPacket, player: PlayerState | null): ValidationResult {
+  validateInput(packet: InputPacket, player: PlayerState): boolean {
+    if (this.banned.has(player.id)) return false;
+
+    // 1. Sequence validation
+    const lastSeq = this.lastSeq.get(player.id) ?? -1;
+    if (packet.seq <= lastSeq) {
+      this.recordViolation(player.id, 'replay: seq ' + packet.seq + ' <= ' + lastSeq);
+      return false;
+    }
+    this.lastSeq.set(player.id, packet.seq);
+
+    // 2. Rate limiting
     const now = Date.now();
-
-    // 1. Rate limiting — prevent input flooding
-    const lastTime = this.lastInputTime.get(input.playerId);
-    if (lastTime && now - lastTime < MAX_INPUT_RATE_MS) {
-      this.recordViolation(input.playerId, 'rate_limit');
-      return { valid: false, reason: 'Input rate exceeded' };
+    const lastTime = this.lastInputTime.get(player.id) ?? 0;
+    if (now - lastTime < this.MIN_INPUT_INTERVAL) {
+      this.recordViolation(player.id, 'rate_limit: ' + (now - lastTime) + 'ms < ' + this.MIN_INPUT_INTERVAL + 'ms');
+      return false;
     }
-    this.lastInputTime.set(input.playerId, now);
+    this.lastInputTime.set(player.id, now);
 
-    // 2. Sequence validation — detect packet manipulation
-    const lastSeq = this.lastSeq.get(input.playerId);
-    if (lastSeq !== undefined) {
-      const seqDelta = input.seq - lastSeq;
-      if (seqDelta > MAX_SEQ_JUMP) {
-        this.recordViolation(input.playerId, 'seq_jump');
-        return { valid: false, reason: `Sequence jump: ${seqDelta}` };
-      }
-      if (seqDelta < 0) {
-        // Out-of-order packet, allow but don't update seq
-        return { valid: true };
+    // 3. Teleport/speed detection
+    const lastPos = this.lastPosition.get(player.id);
+    if (lastPos) {
+      const dt = (now - lastPos.t) / 1000;
+      const dist = Math.sqrt((player.x - lastPos.x) ** 2 + (player.y - lastPos.y) ** 2);
+      const speed = dt > 0 ? dist / dt : 0;
+      const maxAllowed = this.MAX_SPEED * this.SPEED_TOLERANCE;
+      if (speed > maxAllowed) {
+        this.recordViolation(player.id, 'speed_hack: ' + speed.toFixed(0) + ' > ' + maxAllowed);
+        return false;
       }
     }
-    this.lastSeq.set(input.playerId, input.seq);
+    this.lastPosition.set(player.id, { x: player.x, y: player.y, t: now });
 
-    // 3. Input bounds validation
-    if (Math.abs(input.dx) > 1 || Math.abs(input.dy) > 1) {
-      this.recordViolation(input.playerId, 'invalid_input');
-      return { valid: false, reason: 'Input values out of bounds' };
-    }
-
-    // 4. Speed validation — if we have player state, check movement
-    if (player) {
-      const inputMagnitude = Math.sqrt(input.dx ** 2 + input.dy ** 2);
-      if (inputMagnitude > 1.0) {
-        this.recordViolation(input.playerId, 'speed_hack');
-        return { valid: false, reason: 'Normalized input magnitude > 1' };
-      }
-    }
-
-    // 5. Timestamp validation — reject future-dated inputs
-    if (input.timestamp > now + 1000) {
-      this.recordViolation(input.playerId, 'future_timestamp');
-      return { valid: false, reason: 'Timestamp in future' };
-    }
-
-    return { valid: true };
+    return true;
   }
 
   /**
-   * Validate a player's position update (for teleport detection)
+   * Record a violation and check ban threshold
    */
-  validatePosition(playerId: string, prevX: number, prevY: number, newX: number, newY: number): ValidationResult {
-    const dx = newX - prevX;
-    const dy = newY - prevY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+  private recordViolation(playerId: string, reason: string): void {
+    const count = (this.violations.get(playerId) ?? 0) + 1;
+    this.violations.set(playerId, count);
+    console.warn(`[AntiCheat] ${playerId} violation ${count}/${this.BAN_THRESHOLD}: ${reason}`);
 
-    if (dist > MAX_TELEPORT_DIST) {
-      this.recordViolation(playerId, 'teleport');
-      return { valid: false, reason: `Position jump: ${dist.toFixed(2)}px` };
+    if (count >= this.BAN_THRESHOLD) {
+      this.banned.add(playerId);
+      console.warn(`[AntiCheat] ${playerId} BANNED after ${count} violations`);
     }
-
-    return { valid: true };
   }
 
   /**
-   * Check if a player should be banned based on violations
-   */  shouldBan(playerId: string): boolean {
-    const violation = this.violations.get(playerId);
-    if (!violation) return false;
-    return violation.count >= this.banThreshold;
+   * Check if a player is banned
+   */
+  isBanned(playerId: string): boolean {
+    return this.banned.has(playerId);
   }
 
   /**
-   * Get violation summary for a player
-   */  getViolations(playerId: string): PlayerViolation | undefined {
-    return this.violations.get(playerId);
+   * Get violation count for a player
+   */
+  getViolations(playerId: string): number {
+    return this.violations.get(playerId) ?? 0;
   }
 
   /**
-   * Reset violations for a player (e.g. on new match)
-   */  resetPlayer(playerId: string): void {
-    this.violations.delete(playerId);
-    this.lastInputTime.delete(playerId);
+   * Get all banned players
+   */
+  getBannedPlayers(): string[] {
+    return Array.from(this.banned);
+  }
+
+  /**
+   * Reset state for a player (on disconnect)
+   */
+  clearPlayer(playerId: string): void {
     this.lastSeq.delete(playerId);
-  }
-
-  /**
-   * Get all players with active violations (for monitoring)
-   */  getFlaggedPlayers(): PlayerViolation[] {
-    return Array.from(this.violations.values()).filter(v => v.count > 0);
-  }
-
-  private recordViolation(playerId: string, type: string): void {
-    const existing = this.violations.get(playerId);
-    if (existing) {
-      existing.count++;
-      existing.lastViolation = Date.now();
-      existing.type = type;
-    } else {
-      this.violations.set(playerId, {
-        playerId,
-        type,
-        count: 1,
-        lastViolation: Date.now(),
-      });
-    }
-
-    if (existing && existing.count >= this.banThreshold) {
-      console.warn(`[AntiCheat] Player ${playerId} reached ban threshold (${existing.count} violations)`);
-    }
+    this.lastInputTime.delete(playerId);
+    this.violations.delete(playerId);
+    this.lastPosition.delete(playerId);
+    this.banned.delete(playerId);
   }
 }

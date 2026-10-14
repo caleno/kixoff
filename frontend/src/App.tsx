@@ -1,155 +1,197 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
+import MainMenu from './components/screens/MainMenu';
+import MatchmakingScreen from './components/screens/MatchmakingScreen';
+import PostMatchScreen from './components/screens/PostMatchScreen';
+import { useGameSocket } from './hooks/useGameSocket';
+import { useKeyboardInput } from './hooks/useKeyboardInput';
+import ArenaCanvas from './components/game/ArenaCanvas';
+import MatchHUD from './components/hud/MatchHUD';
+import GoalBanner from './components/hud/GoalBanner';
+import { MatchSnapshot, Player, RankTier, getRankFromRating } from './types';
 
-// ==================== KIXoff MAIN APP ====================
+// ═══════════════════════════════════════════════════════════
+// KIXoff — Main App Component (Aura/UI)
+// Screen flow: Splash → Menu → Matchmaking → Game → PostMatch
+// ═══════════════════════════════════════════════════════════
+
+export type ScreenState = 'menu' | 'matchmaking' | 'game' | 'postmatch';
+
+export interface PlayerProfile {
+  id: string;
+  name: string;
+  rating: number;
+  rank: RankTier;
+  kredits: number;
+  gems: number;
+  wins: number;
+  losses: number;
+}
+
+export interface MatchResult {
+  win: boolean;
+  scoreHome: number;
+  scoreAway: number;
+  goals: number;
+  assists: number;
+  saves: number;
+  kreditsEarned: number;
+  xpEarned: number;
+  ratingChange: number;
+}
+
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
 
 export default function App() {
+  const [screen, setScreen] = useState<ScreenState>('menu');
+  const [player, setPlayer] = useState<PlayerProfile>({
+    id: 'local-player',
+    name: 'Player1',
+    rating: 1500,
+    rank: getRankFromRating(1500),
+    kredits: 500,
+    gems: 0,
+    wins: 0,
+    losses: 0,
+  });
+  const [matchmakingTime, setMatchmakingTime] = useState(0);
+  const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
+  const [snapshot, setSnapshot] = useState<MatchSnapshot | null>(null);
+  const [showGoalBanner, setShowGoalBanner] = useState(false);
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [view, setView] = useState<'menu' | 'lobby' | 'game' | 'garage'>('menu');
 
+  // ── Keyboard input ──
+  const input = useKeyboardInput();
+
+  // ── Game socket hook ──
+  const { connected, latency, connect, sendInput, queueMatchmaking, cancelMatchmaking } = useGameSocket();
+
+  // ── Connect on mount ──
   useEffect(() => {
-    const newSocket = io(process.env.VITE_SOCKET_URL || 'http://localhost:3000');
-    setSocket(newSocket);
-
-    newSocket.on('connect', () => setConnected(true));
-    newSocket.on('disconnect', () => setConnected(false));
-
-    return () => {
-      newSocket.close();
-    };
+    connect(SERVER_URL);
   }, []);
 
-  return (
-    <div className="min-h-screen bg-kixoff-navy text-white">
-      {/* HEADER */}
-      <header className="flex items-center justify-between p-4 border-b border-white/10">
-        <h1 className="text-3xl font-heading font-bold text-kixoff-cyan tracking-wider">
-          KIX<span className="text-kixoff-magenta">off</span>
-        </h1>
-        <div className="flex items-center gap-3">
-          <span className={`w-3 h-3 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} />
-          <span className="text-sm text-white/60">
-            {connected ? 'Online' : 'Offline'}
-          </span>
-        </div>
-      </header>
-
-      {/* MAIN CONTENT */}
-      <main className="flex items-center justify-center p-8" style={{ minHeight: 'calc(100vh - 80px)' }}>
-        {view === 'menu' && <MainMenu onPlay={() => setView('lobby')} onGarage={() => setView('garage')} />}
-        {view === 'lobby' && <Lobby socket={socket} onBack={() => setView('menu')} />}
-        {view === 'garage' && <Garage onBack={() => setView('menu')} />}
-      </main>
-    </div>
-  );
-}
-
-// ==================== MAIN MENU ====================
-
-function MainMenu({ onPlay, onGarage }: { onPlay: () => void; onGarage: () => void }) {
-  return (
-    <div className="flex flex-col items-center gap-6">
-      <h2 className="text-5xl font-heading font-bold text-center">
-        Ready to <span className="text-kixoff-cyan">Kick Off</span>?
-      </h2>
-      <div className="flex flex-col gap-4 w-72">
-        <button
-          onClick={onPlay}
-          className="px-8 py-4 bg-kixoff-cyan text-kixoff-navy font-heading font-bold text-xl rounded-lg hover:bg-kixoff-cyan/80 transition-colors"
-        >
-          ▶ PLAY
-        </button>
-        <button
-          onClick={onGarage}
-          className="px-8 py-4 bg-white/10 text-white font-heading font-bold text-xl rounded-lg hover:bg-white/20 transition-colors"
-        >
-          🎨 GARAGE
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ==================== MATCHMAKING LOBBY ====================
-
-function Lobby({ socket, onBack }: { socket: Socket | null; onBack: () => void }) {
-  const [status, setStatus] = useState('Searching for match...');
-  const [playersFound, setPlayersFound] = useState(1);
-
+  // ── Send input to server at 30Hz when in game ──
   useEffect(() => {
-    // Simulate matchmaking
+    if (screen !== 'game') return;
     const interval = setInterval(() => {
-      setPlayersFound((prev) => {
-        if (prev >= 6) {
-          clearInterval(interval);
-          setStatus('Match found! Loading arena...');
-          return 6;
-        }
-        return prev + 1;
-      });
-    }, 1000);
-
+      sendInput(input.current);
+    }, 1000 / 30);
     return () => clearInterval(interval);
+  }, [screen, input, sendInput]);
+
+  // ── Matchmaking timer ──
+  useEffect(() => {
+    if (screen !== 'matchmaking') return;
+    const interval = setInterval(() => {
+      setMatchmakingTime((t) => t + 1);
+    }, 1000);
+    return () => { setMatchmakingTime(0); clearInterval(interval); };
+  }, [screen]);
+
+  // ── Listen for match found ──
+  useEffect(() => {
+    if (!socket) return;
+    socket.on('matchFound', (data: { roomId: string; team: 'home' | 'away' }) => {
+      setScreen('game');
+    });
+    socket.on('snapshot', (snap: MatchSnapshot) => {
+      setSnapshot(snap);
+    });
+    socket.on('goal', () => {
+      setShowGoalBanner(true);
+      setTimeout(() => setShowGoalBanner(false), 2500);
+    });
+    socket.on('matchEnd', (result: MatchResult) => {
+      setMatchResult(result);
+      setScreen('postmatch');
+      // Update player profile
+      setPlayer((p) => ({
+        ...p,
+        rating: p.rating + result.ratingChange,
+        rank: getRankFromRating(p.rating + result.ratingChange),
+        kredits: p.kredits + result.kreditsEarned,
+        wins: p.wins + (result.win ? 1 : 0),
+        losses: p.losses + (result.win ? 0 : 1),
+      }));
+    });
+    return () => {
+      socket.off('matchFound');
+      socket.off('snapshot');
+      socket.off('goal');
+      socket.off('matchEnd');
+    };
+  }, [socket]);
+
+  // ── Handlers ──
+  const handlePlay = useCallback(() => {
+    setScreen('matchmaking');
+    queueMatchmaking({ playerId: player.id, rating: player.rating });
+  }, [player, queueMatchmaking]);
+
+  const handleCancelMatchmaking = useCallback(() => {
+    cancelMatchmaking();
+    setScreen('menu');
+  }, [cancelMatchmaking]);
+
+  const handlePlayAgain = useCallback(() => {
+    setMatchResult(null);
+    setSnapshot(null);
+    setScreen('matchmaking');
+    queueMatchmaking({ playerId: player.id, rating: player.rating });
+  }, [player, queueMatchmaking]);
+
+  const handleBackToMenu = useCallback(() => {
+    setMatchResult(null);
+    setSnapshot(null);
+    setScreen('menu');
   }, []);
 
-  return (
-    <div className="flex flex-col items-center gap-6">
-      <h2 className="text-3xl font-heading font-bold text-kixoff-amber">{status}</h2>
-      <div className="flex gap-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={i}
-            className={`w-16 h-16 rounded-lg border-2 flex items-center justify-center text-2xl ${
-              i < playersFound
-                ? 'border-kixoff-cyan bg-kixoff-cyan/20'
-                : 'border-white/20 bg-white/5'
-            }`}
-          >
-            {i < playersFound ? '🟢' : '⏳'}
-          </div>
-        ))}
-      </div>
-      <p className="text-white/60">{playersFound} / 6 players ready</p>
-      <button
-        onClick={onBack}
-        className="px-6 py-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors"
-      >
-        Cancel
-      </button>
-    </div>
-  );
-}
+  // ── Render ──
+  switch (screen) {
+    case 'menu':
+      return (
+        <MainMenu
+          player={player}
+          onPlay={handlePlay}
+          onSettings={() => console.log('settings')}
+          onCosmetics={() => console.log('cosmetics')}
+        />
+      );
 
-// ==================== GARAGE ====================
+    case 'matchmaking':
+      return (
+        <MatchmakingScreen
+          elapsed={matchmakingTime}
+          onCancel={handleCancelMatchmaking}
+        />
+      );
 
-function Garage({ onBack }: { onBack: () => void }) {
-  const [color, setColor] = useState('#00F0FF');
-
-  const colors = ['#00F0FF', '#FF006E', '#FFB800', '#00FF88', '#FF5500', '#9D00FF'];
-
-  return (
-    <div className="flex flex-col items-center gap-6 w-full max-w-2xl">
-      <h2 className="text-3xl font-heading font-bold">🎨 Garage</h2>
-      <div className="w-40 h-40 rounded-full border-4" style={{ borderColor: color, backgroundColor: color + '33' }} />
-      <div className="flex gap-3">
-        {colors.map((c) => (
-          <button
-            key={c}
-            onClick={() => setColor(c)}
-            className={`w-10 h-10 rounded-full border-2 transition-transform ${
-              color === c ? 'scale-125 border-white' : 'border-transparent'
-            }`}
-            style={{ backgroundColor: c }}
+    case 'game':
+      return (
+        <div style={{ position: 'relative', width: '100vw', height: '100vh', background: '#0A0E27' }}>
+          <ArenaCanvas snapshot={snapshot} />
+          <MatchHUD
+            scoreHome={snapshot?.scoreHome ?? 0}
+            scoreAway={snapshot?.scoreAway ?? 0}
+            timer={snapshot?.timer ?? 180}
+            fps={60}
+            ping={latency}
           />
-        ))}
-      </div>
-      <button
-        onClick={onBack}
-        className="px-6 py-2 bg-white/10 rounded-lg hover:bg-white/20 transition-colors"
-      >
-        ← Back
-      </button>
-    </div>
-  );
+          {showGoalBanner && <GoalBanner />}
+        </div>
+      );
+
+    case 'postmatch':
+      return (
+        <PostMatchScreen
+          result={matchResult!}
+          onPlayAgain={handlePlayAgain}
+          onContinue={handleBackToMenu}
+        />
+      );
+
+    default:
+      return <MainMenu player={player} onPlay={handlePlay} onSettings={() => {}} onCosmetics={() => {}} />;
+  }
 }
