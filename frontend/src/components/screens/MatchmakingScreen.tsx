@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { colors, fonts, spacing, radii } from '../../styles/tokens';
 
 interface MatchmakingScreenProps {
-  onMatchFound: () => void;
+  onMatchFound: (matchId: string) => void;
   onCancel: () => void;
 }
 
@@ -14,57 +14,59 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ onMatchFou
   useEffect(() => {
     const timer = setInterval(() => {
       setElapsed((e) => e + 1);
-      if (playersFound < 6 && Math.random() > 0.6) {
-        setPlayersFound((p) => Math.min(p + 1, 6));
-      }
+      setPlayersFound((p) => Math.min(p + Math.random() > 0.7 ? 1 : 0, 6));
     }, 1000);
     return () => clearInterval(timer);
-  }, [playersFound]);
+  }, []);
 
-  useEffect(() => {
-    if (playersFound === 6) {
-      const timeout = setTimeout(onMatchFound, 1500);
-      return () => clearTimeout(timeout);
-    }
-  }, [playersFound, onMatchFound]);
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
 
   return (
     <div style={{
-      minHeight: '100vh', background: colors.base,
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', gap: spacing.xl,
+      minHeight: '100vh', background: colors.base, display: 'flex',
+      flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      fontFamily: fonts.body, color: colors.textPrimary, gap: spacing.xl,
     }}>
       <motion.div
         animate={{ rotate: 360 }}
         transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
         style={{
-          width: 80, height: 80, borderRadius: '50%',
-          border: `4px solid ${colors.surfaceAlt}`,
+          width: '80px', height: '80px',
+          border: `4px solid ${colors.surfaceHi}`,
           borderTopColor: colors.accent,
+          borderRadius: '50%',
         }}
       />
-      <div style={{ fontFamily: fonts.heading, fontSize: '2rem', color: colors.textPrimary }}>
-        Finding Match...
+      <div style={{ textAlign: 'center' }}>
+        <h2 style={{ fontFamily: fonts.heading, fontSize: '2rem', color: colors.accent, margin: 0 }}>
+          Searching for Match
+        </h2>
+        <p style={{ color: colors.textSecondary, marginTop: spacing.sm }}>
+          {playersFound}/6 players found · {formatTime(elapsed)}
+        </p>
       </div>
-      <div style={{ color: colors.textSecondary, fontFamily: fonts.body }}>
-        {playersFound}/6 players found · {elapsed}s
-      </div>
-      <div style={{ display: 'flex', gap: spacing.sm }}>
+      <div style={{ display: 'flex', gap: spacing.md }}>
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} style={{
-            width: 12, height: 12, borderRadius: '50%',
-            background: i < playersFound ? colors.accent : colors.surfaceHi,
-            boxShadow: i < playersFound ? `0 0 8px ${colors.accent}` : 'none',
+            width: '40px', height: '40px', borderRadius: '50%',
+            background: i < playersFound ? colors.accent : colors.surfaceAlt,
+            border: `2px solid ${i < playersFound ? colors.accent : colors.surfaceHi}`,
+            boxShadow: i < playersFound ? `0 0 12px ${colors.accent}80` : 'none',
+            transition: 'all 300ms ease',
           }} />
         ))}
       </div>
       <button
         onClick={onCancel}
         style={{
-          padding: `${spacing.sm} ${spacing.xl}`,
-          background: 'transparent', border: `1px solid ${colors.danger}`,
-          borderRadius: radii.md, color: colors.danger,
-          fontFamily: fonts.body, cursor: 'pointer', fontSize: '1rem',
+          fontFamily: fonts.heading, fontSize: '1rem',
+          padding: `${spacing.sm} ${spacing.xl}`, borderRadius: radii.md,
+          background: 'transparent', color: colors.danger,
+          border: `1px solid ${colors.danger}`, cursor: 'pointer',
         }}
       >Cancel</button>
     </div>
