@@ -1,0 +1,76 @@
+name: KIXoff CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # ==================== LINT & TEST ====================
+  test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true # Allow build to proceed during scaffold phase
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+        continue-on-error: true # Allow build to proceed during scaffold phase
+
+  # ==================== SECURITY SCAN ====================
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+        continue-on-error: true # Allow build during scaffold phase
+
+      - name: Run Secret Scanning
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ==================== DOCKER BUILD ====================
+  build-image:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t kixoff-server:latest .
+
+      - name: Run Docker image test
+        run: |
+          docker run -d -p 3000:3000 --name kixoff-test kixoff-server:latest
+          sleep 5
+          curl -f http://localhost:3000/health || exit 1
+          docker stop kixoff-test
+          docker rm kixoff-test

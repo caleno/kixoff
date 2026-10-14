@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --kixoff-navy: #0A0E27;
+  --kixoff-cyan: #00F0FF;
+  --kixoff-magenta: #FF006E;
+  --kixoff-amber: #FFB800;
+}
+
+body {
+  margin: 0;
+  background-color: var(--kixoff-navy);
+  color: white;
+  font-family: 'Inter', sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Rajdhani', sans-serif;
+}
