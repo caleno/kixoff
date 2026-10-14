@@ -1,32 +1,35 @@
-// ===== KIXoff Matchmaking Service — Glicko-2 based =====
+// ===== KIXoff Matchmaking Service =====
+// Glicko-2 based skill matching with queue timeout
 
+import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger.js';
+
+const SKILL_BAND = parseInt(process.env.MM_SKILL_BAND || '200', 10);
+const QUEUE_TIMEOUT_MS = parseInt(process.env.MM_QUEUE_TIMEOUT_MS || '30000', 10);
+const TEAM_SIZE = 3;
 
 interface QueueEntry {
   playerId: string;
   rating: number;
-  rd: number; // rating deviation (Glicko-2)
   joinedAt: number;
   socketId?: string;
 }
 
 interface MatchFound {
   matchId: string;
-  players: string[];
+  players: QueueEntry[];
 }
 
-const MAX_PLAYERS = parseInt(process.env.MAX_PLAYERS_PER_MATCH || '6', 10);
-const QUEUE_TIMEOUT_MS = parseInt(process.env.MM_QUEUE_TIMEOUT_MS || '30000', 10);
-const SKILL_BAND = parseInt(process.env.MM_SKILL_BAND || '200', 10);
+type MatchFoundCallback = (match: MatchFound) => void;
 
 class MatchmakingService {
-  private queue: Map<string, QueueEntry> = new Map();
-  private onMatchFound?: (match: MatchFound) => void;
+  private queue: QueueEntry[] = [];
+  private onMatchFound: MatchFoundCallback | null = null;
   private intervalId: NodeJS.Timeout | null = null;
 
-  start(onMatchFound: (match: MatchFound) => void): void {
-    this.onMatchFound = onMatchFound;
-    this.intervalId = setInterval(() => this.processQueue(), 1000);
+  start(callback: MatchFoundCallback): void {
+    this.onMatchFound = callback;
+    this.intervalId = setInterval(() => this.tryMatch(), 1000);
     logger.info('Matchmaking service started');
   }
 
@@ -35,91 +38,71 @@ class MatchmakingService {
     this.intervalId = null;
   }
 
-  joinQueue(playerId: string, rating: number, rd: number = 350): void {
-    if (this.queue.has(playerId)) {
+  joinQueue(playerId: string, rating: number): void {
+    // Don't add if already in queue
+    if (this.queue.some((e) => e.playerId === playerId)) {
       logger.warn(`Player ${playerId} already in queue`);
       return;
     }
 
-    this.queue.set(playerId, {
+    this.queue.push({
       playerId,
       rating,
-      rd,
       joinedAt: Date.now(),
     });
-
-    logger.info(`Player ${playerId} joined queue (rating: ${rating})`);
+    logger.info(`Player ${playerId} (rating ${rating}) joined queue. Queue size: ${this.queue.length}`);
   }
 
   leaveQueue(playerId: string): void {
-    this.queue.delete(playerId);
-  }
-
-  getQueueSize(): number {
-    return this.queue.size;
-  }
-
-  private processQueue(): void {
-    const now = Date.now();
-    const entries = Array.from(this.queue.values());
-
-    // Remove timed-out entries
-    for (const entry of entries) {
-      if (now - entry.joinedAt > QUEUE_TIMEOUT_MS) {
-        this.queue.delete(entry.playerId);
-        logger.info(`Player ${entry.playerId} timed out from queue`);
-      }
+    const before = this.queue.length;
+    this.queue = this.queue.filter((e) => e.playerId !== playerId);
+    if (this.queue.length < before) {
+      logger.info(`Player ${playerId} left queue. Queue size: ${this.queue.length}`);
     }
+  }
 
-    if (this.queue.size < MAX_PLAYERS) return;
+  private tryMatch(): void {
+    if (this.queue.length < TEAM_SIZE * 2) return;
 
-    // Group players by skill band
-    const sorted = Array.from(this.queue.values()).sort((a, b) => a.rating - b.rating);
+    const now = Date.now();
 
-    // Sliding window to find MAX_PLAYERS players within skill band
-    for (let i = 0; i <= sorted.length - MAX_PLAYERS; i++) {
-      const window = sorted.slice(i, i + MAX_PLAYERS);
-      const ratingSpread = window[MAX_PLAYERS - 1].rating - window[0].rating;
+    // Sort by rating for better matching
+    const sorted = [...this.queue].sort((a, b) => a.rating - b.rating);
 
-      if (ratingSpread <= SKILL_BAND) {
+    // Try to find 6 players within skill band
+    for (let i = 0; i <= sorted.length - TEAM_SIZE * 2; i++) {
+      const group = sorted.slice(i, i + TEAM_SIZE * 2);
+      const ratingSpread = group[group.length - 1].rating - group[0].rating;
+
+      // Check if within skill band OR if any player has waited too long (widening)
+      const maxWait = Math.max(...group.map((g) => now - g.joinedAt));
+      const dynamicBand = SKILL_BAND + Math.min(maxWait * 5, 300); // Widen up to +300
+
+      if (ratingSpread <= dynamicBand) {
         // Found a match!
-        const matchId = `match_${now}_${Math.random().toString(36).substring(2, 8)}`;
-        const playerIds = window.map((w) => w.playerId);
+        const matchId = uuidv4();
+        const matchedPlayers = group;
 
         // Remove from queue
-        for (const w of window) {
-          this.queue.delete(w.playerId);
-        }
+        const matchedIds = new Set(matchedPlayers.map((p) => p.playerId));
+        this.queue = this.queue.filter((e) => !matchedIds.has(e.playerId));
 
-        logger.info(`Match ${matchId} created with players: ${playerIds.join(', ')}`);
+        logger.info(`Match ${matchId} created. Players: ${matchedPlayers.map((p) => p.playerId).join(', ')}`);
 
         if (this.onMatchFound) {
-          this.onMatchFound({ matchId, players: playerIds });
+          this.onMatchFound({ matchId, players: matchedPlayers });
         }
-
         return;
       }
     }
+  }
 
-    // If no perfect match found and queue is getting long, widen the band
-    const oldestEntry = sorted[0];
-    if (oldestEntry && now - oldestEntry.joinedAt > QUEUE_TIMEOUT_MS * 0.7) {
-      // Force match with closest available players
-      if (sorted.length >= MAX_PLAYERS) {
-        const matchId = `match_${now}_forced`;
-        const playerIds = sorted.slice(0, MAX_PLAYERS).map((w) => w.playerId);
+  getQueueSize(): number {
+    return this.queue.length;
+  }
 
-        for (let i = 0; i < MAX_PLAYERS; i++) {
-          this.queue.delete(sorted[i].playerId);
-        }
-
-        logger.info(`Forced match ${matchId} created (widened band)`);
-
-        if (this.onMatchFound) {
-          this.onMatchFound({ matchId, players: playerIds });
-        }
-      }
-    }
+  getQueuePosition(playerId: string): number {
+    return this.queue.findIndex((e) => e.playerId === playerId);
   }
 }
 
