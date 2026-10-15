@@ -56,7 +56,7 @@ export function updateRating(player: Glicko2Player, matches: Glicko2Match[]): Gl
 
   // Iterative procedure for volatility
   let x = x0;
-  for (let i = 0; i 100; i++) {
+  for (let i = 0; i < 100; i++) {
     const expX = Math.exp(x);
     const d2 = delta * delta - v;
     const h0 = -(x - a) / (TAU * TAU) - expX * (d2 - expX) / (2 * (expX + v) * (expX + v));
