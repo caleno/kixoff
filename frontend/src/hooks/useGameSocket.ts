@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { io, type Socket } from 'socket.io-client';
 import type { Snapshot, PlayerInput } from '../types';
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
@@ -27,11 +27,8 @@ export function useGameSocket(matchId: string | null) {
 
     socket.on('disconnect', () => setConnected(false));
     socket.on('connect_error', (err: Error) => setError(err.message));
-
     socket.on('snapshot', (snap: Snapshot) => setSnapshot(snap));
-    socket.on('match_ended', () =>
-      setSnapshot((prev) => (prev ? { ...prev, phase: 'ended' } : null))
-    );
+    socket.on('match_ended', () => setSnapshot((prev) => (prev ? { ...prev, phase: 'ended' } : null)));
     socket.on('error', (msg: string) => setError(msg));
 
     return () => {
@@ -40,19 +37,15 @@ export function useGameSocket(matchId: string | null) {
     };
   }, [matchId]);
 
-  const sendInput = useCallback(
-    (input: Omit<PlayerInput, 'seq' | 'timestamp'>) => {
-      const socket = socketRef.current;
-      if (!socket || !socket.connected) return;
-      const fullInput: PlayerInput = {
-        ...input,
-        seq: inputSeq.current++,
-        timestamp: Date.now(),
-      };
-      socket.emit('player_input', fullInput);
-    },
-    []
-  );
+  const sendInput = useCallback((input: Omit<PlayerInput, 'seq' | 'timestamp'>) => {
+    const socket = socketRef.current;
+    if (!socket || !socket.connected) return;
+    socket.emit('player_input', {
+      ...input,
+      seq: inputSeq.current++,
+      timestamp: Date.now(),
+    } satisfies PlayerInput);
+  }, []);
 
   return { connected, snapshot, error, sendInput };
 }
