@@ -1,0 +1,41 @@
+{
+  "id": "com.caleno.kixoff",
+  "title": "KIXoff",
+  "author": "caleno",
+  "description": "Fast-paced 3v3 real-time sports-arcade game for Cloduron",
+  "tagline": "Neon 3v3 sports arcade",
+  "version": "0.1.0",
+  "healthCheckPath": "/health",
+  "httpPort": 3000,
+  "addons": {
+    "postgresql": {},
+    "redis": {},
+    "localstorage": {}
+  },
+  "manifestVersion": 2,
+  "memoryLimit": 1024,
+  "minBoxVersion": "7.0.0",
+  "website": "https://github.com/caleno/kixoff",
+  "contactEmail": "lennart.nordgreen@uib.no",
+  "changelog": "Initial Cloudron manifest for KIXoff deployment",
+  "documentationUrl": "https://github.com/caleno/kixoff#readme",
+  "icon": "logo.png",
+  "tags": ["game", "multiplayer", "real-time", "sports", "arcade"],
+  "checklist": {
+    "alttext": "pending"
+  },
+  "capabilities": ["socketio"],
+  "environment": {
+    "NODE_ENV": "production"
+  },
+  "services": [
+    {
+      "name": "web",
+      "port": 3000,
+      "path": "/"
+    }
+  ],
+  "sso": {
+    "required": true
+  }
+}
