@@ -1,5 +1,5 @@
 # KIXoff Game Server
-FROM node:20-alpine
+FROM node:20-alpine AS build
 
 WORKDIR /app
 
@@ -13,12 +13,22 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-# Expose API and WebSocket ports
+# Production runtime image
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files and install runtime deps only
+COPY package*.json ./
+RUN npm install --omit=dev && npm cache clean --force
+
+# Copy built artifacts from build stage
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/frontend/dist ./frontend/dist
+
 EXPOSE 3000
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
-# Start the server
 CMD ["node", "dist/server.js"]
