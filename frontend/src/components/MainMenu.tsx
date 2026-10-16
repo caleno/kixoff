@@ -14,7 +14,8 @@ export function MainMenu({ player, navigate }: Props) {
           KIX<span className="text-kix-pink neon-pink">off</span>
         </h1>
         <div className="glass-card px-4 py-2 flex items-center gap-4">
-          <span className="font-display text-kix-text-primary text-lg">{player.username}</n          <span className="text-kix-gold font-display">★ {player.rating}</span>
+          <span className="font-display text-kix-text-primary text-lg">{player.username}</span>
+          <span className="text-kix-gold font-display">★ {player.rating}</span>
           <span className="text-kix-cyan font-display">Lv.{player.level}</span>
         </div>
       </div>
@@ -30,7 +31,10 @@ export function MainMenu({ player, navigate }: Props) {
         <button className="glass-card px-6 py-3 font-display font-semibold text-lg text-kix-text-primary hover:border-kix-cyan/30 transition-all" onClick={() => navigate('profile')}>
           👤 PROFILE
         </button>
-        <button className="glass-card px-6 py-3 font-display font-semibold text-lg text-kix-text-primary hover:border-kix-pink/30 transition-all" onClick={() => navigate('shop')}>
+        <button className="glass-card px-6 py-3 font-display font-semibold text-lg text-kix-text-primary hover:border-kix-cyan/30 transition-all" onClick={() => navigate('leaderboard')}>
+          🏆 LEADERBOARD
+        </button>
+        <button className="glass-card px-6 py-3 font-display font-semibold text-lg text-kix-text-primary hover:border-kix-cyan/30 transition-all" onClick={() => navigate('shop')}>
           🛒 SHOP
         </button>
         <button className="glass-card px-6 py-3 font-display font-semibold text-lg text-kix-text-secondary hover:border-white/20 transition-all" onClick={() => navigate('settings')}>
