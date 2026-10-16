@@ -1,0 +1,18 @@
+# KIXoff — Prometheus Monitoring Config
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kixoff-server-monitor
+  labels:
+    app: kixoff
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: kixoff
+      component: server
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s

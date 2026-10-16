@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # KIXoff Game Server
+  kixoff-server:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=kixoff_admin
+      - DB_PASSWORD=change_me_in_production
+      - DB_NAME=kixoff_db
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev_secret_change_me
+      - CORS_ORIGIN=http://localhost:5173
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=kixoff_admin
+      - POSTGRES_PASSWORD=change_me_in_production
+      - POSTGRES_DB=kixoff_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

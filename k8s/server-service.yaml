@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kixoff-server-svc
+  labels:
+    app: kixoff
+    component: server
+spec:
+  type: ClusterIP
+  selector:
+    app: kixoff
+    component: server
+  ports:
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
+      name: http
