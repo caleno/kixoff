@@ -22,13 +22,6 @@
   "icon": "logo.png",
   "tags": ["game", "multiplayer", "real-time", "sports", "arcade"],
   "capabilities": ["socketio"],
-  "services": [
-    {
-      "name": "web",
-      "port": 3000,
-      "path": "/"
-    }
-  ],
   "sso": {
     "required": true
   }
