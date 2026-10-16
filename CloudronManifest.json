@@ -20,9 +20,5 @@
   "changelog": "Initial Cloudron manifest for KIXoff deployment",
   "documentationUrl": "https://github.com/caleno/kixoff#readme",
   "icon": "logo.png",
-  "tags": ["game", "multiplayer", "real-time", "sports", "arcade"],
-  "capabilities": ["socketio"],
-  "sso": {
-    "required": true
-  }
+  "tags": ["game", "multiplayer", "real-time", "sports", "arcade"]
 }
