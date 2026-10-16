@@ -17,17 +17,14 @@ const io = new SocketServer(server, {
   cors: { origin: process.env.CORS_ORIGIN || 'http://localhost:5173', methods: ['GET', 'POST'] },
 });
 
-// Middleware
 app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:5173' }));
 app.use(express.json());
 
-// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/player', playerRoutes);
 app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
-// Socket.io — authenticate then attach to game
 io.use(authenticateSocket);
 
 io.on('connection', (socket) => {
@@ -52,7 +49,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// Start game loop
 gameLoop.start(io);
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
