@@ -1,64 +1,117 @@
-// ==================== GAME STATE INTERFACES ====================
+// ===== KIXoff Game State Types =====
 
-export interface Vector3 {
+export type Team = 'home' | 'away';
+
+export interface Vec2 {
   x: number;
   y: number;
-  z: number;
 }
 
 export interface PlayerState {
   id: string;
-  position: Vector3;
-  velocity: Vector3;
-  boost: number;
+  team: Team;
+  position: Vec2;
+  velocity: Vec2;
+  rotation: number;
   stamina: number;
-  lastActionTimestamp: number;
-  actionHistory: number[];
+  hasBall: boolean;
+  isStunned: boolean;
+  stunUntil: number;
+  lastInputSeq: number;
 }
 
 export interface BallState {
-  position: Vector3;
-  velocity: Vector3;
-  spin: number;
+  position: Vec2;
+  velocity: Vec2;
   ownerId: string | null;
+  spin: number;
 }
 
-export interface GameState {
-  matchId: string;
-  players: PlayerState[];
+export interface MatchState {
+  id: string;
+  phase: 'countdown' | 'playing' | 'goal-celebration' | 'halftime' | 'ended';
+  timeRemaining: number;
+  homeScore: number;
+  awayScore: number;
+  players: Map<string, PlayerState>;
   ball: BallState;
-  score: { home: number; away: number };
-  phase: 'countdown' | 'playing' | 'goal' | 'overtime' | 'ended';
-  timestamp: number;
+  arena: ArenaConfig;
+  lastGoalScorer: string | null;
+  lastGoalTeam: Team | null;
+  events: GameEvent[];
 }
-
-// ==================== GAME CONSTANTS ====================
-
-export const TICK_RATE = 60;
-export const CLIENT_UPDATE_RATE = 20;
-export const TICK_INTERVAL = 1000 / TICK_RATE;
-export const MAX_VELOCITY = 25;
-export const VELOCITY_TOLERANCE = 2;
-export const MIN_ACTION_INTERVAL = 16; // ms (approx 60Hz)
-export const MAX_PLAYERS_PER_ROOM = 6;
-export const MATCH_DURATION_MS = 3 * 60 * 1000; // 3 minutes
-
-// ==================== ARENA CONFIG ====================
 
 export interface ArenaConfig {
   width: number;
-  length: number;
+  height: number;
   goalWidth: number;
-  wallHeight: number;
+  goalDepth: number;
+  wallBounce: number;
   friction: number;
-  restitution: number;
 }
 
-export const DEFAULT_ARENA: ArenaConfig = {
-  width: 80,
-  length: 120,
-  goalWidth: 20,
-  wallHeight: 15,
-  friction: 0.98,
-  restitution: 0.85,
+export interface GameEvent {
+  type: 'goal' | 'steal' | 'stun' | 'pass' | 'shot' | 'save' | 'kickoff';
+  timestamp: number;
+  playerId?: string;
+  team?: Team;
+  data?: Record<string, unknown>;
+}
+
+export interface PlayerInput {
+  seq: number;
+  moveX: number;
+  moveY: number;
+  action: 'none' | 'pass' | 'shoot' | 'tackle' | 'dash';
+  actionTarget?: Vec2;
+  timestamp: number;
+}
+
+export interface Snapshot {
+  matchId: string;
+  tick: number;
+  timeRemaining: number;
+  phase: MatchState['phase'];
+  homeScore: number;
+  awayScore: number;
+  players: Array<{
+    id: string;
+    team: Team;
+    x: number;
+    y: number;
+    rot: number;
+    stamina: number;
+    hasBall: boolean;
+    stunned: boolean;
+  }>;
+  ball: { x: number; y: number; vx: number; vy: number; ownerId: string | null };
+  lastEvent: GameEvent | null;
+}
+
+// ===== Arena Constants =====
+export const ARENA: ArenaConfig = {
+  width: 800,
+  height: 500,
+  goalWidth: 120,
+  goalDepth: 30,
+  wallBounce: 0.7,
+  friction: 0.92,
 };
+
+export const PLAYER_RADIUS = 14;
+export const BALL_RADIUS = 8;
+export const PLAYER_SPEED = 180; // pixels per second
+export const PLAYER_DASH_SPEED = 320;
+export const DASH_DURATION_MS = 200;
+export const DASH_COOLDOWN_MS = 2000;
+export const STUN_DURATION_MS = 1000;
+export const TACKLE_RANGE = 28;
+export const TACKLE_COOLDOWN_MS = 1500;
+export const PASS_SPEED = 400;
+export const SHOT_SPEED = 550;
+export const STAMINA_MAX = 100;
+export const STAMINA_DASH_COST = 25;
+export const STAMINA_REGEN = 15; // per second
+export const MATCH_DURATION_MS = 180000; // 3 minutes
+export const COUNTDOWN_MS = 3000;
+export const GOAL_CELEBRATION_MS = 2500;

@@ -1,128 +1,88 @@
-import {
-  PlayerState,
-  GameState,
-  MAX_VELOCITY,
-  VELOCITY_TOLERANCE,
-  MIN_ACTION_INTERVAL,
-} from '../game/state';
+// ===== Sentinel: Anti-Cheat Validation Module =====
+// Server-authoritative input validation
 
-// ==================== ANTI-CHEAT VALIDATION ====================
+import type { PlayerInput } from '../game/state.js';
 
-export type ValidationResult = 'ACCEPT' | 'REJECT' | 'FLAG';
+const MAX_INPUT_RATE = 60; // max inputs per second
+const MAX_MOVE_MAGNITUDE = 1.0;
+const MAX_TIMESTAMP_DRIFT_MS = 500;
 
-/**
- * Validates a player action server-side to prevent cheating.
- * All gameplay is server-authoritative — the client is render-only.
- */
-export function validatePlayerAction(
-  action: any,
-  playerState: PlayerState,
-  gameState: GameState
-): ValidationResult {
-  // 1. Speed hack check — max velocity enforced
-  if (action.velocity) {
-    const speed = Math.sqrt(
-      action.velocity.x ** 2 +
-      action.velocity.y ** 2 +
-      action.velocity.z ** 2
-    );
-    if (speed > MAX_VELOCITY + VELOCITY_TOLERANCE) {
-      console.warn(`[Sentinel] Speed hack detected from ${playerState.id}: speed=${speed}`);
-      return 'REJECT';
-    }
+const inputHistory: Map<string, number[]> = new Map();
+
+export function validateInput(input: PlayerInput): boolean {
+  // Check required fields
+  if (typeof input.seq !== 'number' || input.seq < 0) return false;
+  if (typeof input.moveX !== 'number' || typeof input.moveY !== 'number') return false;
+  if (typeof input.timestamp !== 'number') return false;
+
+  // Clamp movement vector magnitude
+  const mag = Math.sqrt(input.moveX ** 2 + input.moveY ** 2);
+  if (mag > MAX_MOVE_MAGNITUDE + 0.01) {
+    return false;
   }
 
-  // 2. Teleport check — position delta within movement budget
-  if (action.position) {
-    const dx = action.position.x - playerState.position.x;
-    const dy = action.position.y - playerState.position.y;
-    const dz = action.position.z - playerState.position.z;
-    const distance = Math.sqrt(dx ** 2 + dy ** 2 + dz ** 2);
-    const maxDist = MAX_VELOCITY * (1000 / 60) * 1.5; // 1.5x tick budget
-
-    if (distance > maxDist) {
-      console.warn(`[Sentinel] Teleport detected from ${playerState.id}: distance=${distance}`);
-      return 'FLAG';
-    }
+  // Validate action enum
+  const validActions = ['none', 'pass', 'shoot', 'tackle', 'dash'];
+  if (!validActions.includes(input.action)) {
+    return false;
   }
 
-  // 3. Rate limiting — action frequency cap
+  // Check timestamp isn't too far from server time
   const now = Date.now();
-  if (now - playerState.lastActionTimestamp < MIN_ACTION_INTERVAL) {
-    return 'REJECT';
+  if (Math.abs(now - input.timestamp) > MAX_TIMESTAMP_DRIFT_MS) {
+    return false;
   }
 
-  // 4. Input replay detection — statistical anomaly detection
-  if (detectBotPattern(playerState.actionHistory)) {
-    console.warn(`[Sentinel] Bot pattern detected from ${playerState.id}`);
-    return 'FLAG';
-  }
-
-  // Update player action history (keep last 100 actions)
-  playerState.actionHistory.push(now);
-  if (playerState.actionHistory.length > 100) {
-    playerState.actionHistory.shift();
-  }
-  playerState.lastActionTimestamp = now;
-
-  return 'ACCEPT';
+  return true;
 }
 
-/**
- * Detects automated bot patterns by analyzing action timing intervals.
- * Humans have natural variance; bots tend to be unnaturally consistent.
- */
-function detectBotPattern(actionHistory: number[]): boolean {
-  if (actionHistory.length < 20) return false;
+export function validateMovement(
+  oldPos: { x: number; y: number },
+  newPos: { x: number; y: number },
+  deltaTime: number,
+  maxSpeed: number
+): boolean {
+  const dx = newPos.x - oldPos.x;
+  const dy = newPos.y - oldPos.y;
+  const distance = Math.sqrt(dx ** 2 + dy ** 2);
+  const maxDistance = maxSpeed * deltaTime * 1.1; // 10% tolerance
 
-  // Calculate intervals between actions
-  const intervals: number[] = [];
-  for (let i = 1; i < actionHistory.length; i++) {
-    intervals.push(actionHistory[i] - actionHistory[i - 1]);
+  return distance <= maxDistance;
+}
+
+export function checkInputRate(playerId: string): boolean {
+  const now = Date.now();
+  const history = inputHistory.get(playerId) || [];
+
+  // Remove entries older than 1 second
+  const recent = history.filter((t) => now - t < 1000);
+
+  if (recent.length >= MAX_INPUT_RATE) {
+    return false; // Rate limit exceeded
   }
 
-  // Calculate standard deviation of intervals
-  const mean = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-  const variance =
-    intervals.reduce((sum, val) => sum + (val - mean) ** 2, 0) / intervals.length;
-  const stdDev = Math.sqrt(variance);
+  recent.push(now);
+  inputHistory.set(playerId, recent);
+  return true;
+}
 
-  // If standard deviation is suspiciously low (< 2ms), likely a bot
-  // Humans typically have 10-30ms variance in reaction time
-  if (stdDev < 2) {
-    return true;
+export function detectSpeedHack(
+  positions: Array<{ x: number; y: number; t: number }>,
+  maxSpeed: number
+): boolean {
+  for (let i = 1; i < positions.length; i++) {
+    const dx = positions[i].x - positions[i - 1].x;
+    const dy = positions[i].y - positions[i - 1].y;
+    const dt = (positions[i].t - positions[i - 1].t) / 1000;
+    if (dt <= 0) continue;
+    const speed = Math.sqrt(dx ** 2 + dy ** 2) / dt;
+    if (speed > maxSpeed * 1.15) {
+      return true;
+    }
   }
-
   return false;
 }
 
-// ==================== RATE LIMITING ====================
-
-export class RateLimiter {
-  private requests: Map<string, number[]> = new Map();
-  private readonly windowMs: number;
-  private readonly maxRequests: number;
-
-  constructor(windowMs: number = 60000, maxRequests: number = 100) {
-    this.windowMs = windowMs;
-    this.maxRequests = maxRequests;
-  }
-
-  check(key: string): boolean {
-    const now = Date.now();
-    const timestamps = this.requests.get(key) || [];
-    const validTimestamps = timestamps.filter((t) => now - t < this.windowMs);
-
-    if (validTimestamps.length >= this.maxRequests) {
-      return false; // Rate limited
-    }
-
-    validTimestamps.push(now);
-    this.requests.set(key, validTimestamps);
-    return true;
-  }
-
-  clear(key: string) {
-    this.requests.delete(key);
-  }
+export function clearPlayerHistory(playerId: string): void {
+  inputHistory.delete(playerId);
 }

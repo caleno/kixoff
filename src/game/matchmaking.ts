@@ -1,102 +1,109 @@
-import { MAX_PLAYERS_PER_ROOM } from './state';
+// ===== KIXoff Matchmaking Service =====
+// Glicko-2 based skill matching with queue timeout
 
-// ==================== MATCHMAKING SYSTEM ====================
+import { v4 as uuidv4 } from 'uuid';
+import { logger } from '../utils/logger.js';
 
-interface QueuePlayer {
+const SKILL_BAND = parseInt(process.env.MM_SKILL_BAND || '200', 10);
+const QUEUE_TIMEOUT_MS = parseInt(process.env.MM_QUEUE_TIMEOUT_MS || '30000', 10);
+const TEAM_SIZE = 3;
+
+interface QueueEntry {
   playerId: string;
   rating: number;
   joinedAt: number;
-  socketId: string;
+  socketId?: string;
 }
 
-export class MatchmakingQueue {
-  private queue: QueuePlayer[] = [];
-  private readonly RATING_SPREAD = 150;
-  private readonly WIDEN_INTERVAL = 15000; // 15 seconds
+interface MatchFound {
+  matchId: string;
+  players: QueueEntry[];
+}
 
-  join(player: QueuePlayer) {
-    this.queue.push(player);
-    console.log(`[KIXoff] Player ${player.playerId} (rating: ${player.rating}) joined queue. Queue size: ${this.queue.length}`);
+type MatchFoundCallback = (match: MatchFound) => void;
+
+class MatchmakingService {
+  private queue: QueueEntry[] = [];
+  private onMatchFound: MatchFoundCallback | null = null;
+  private intervalId: NodeJS.Timeout | null = null;
+
+  start(callback: MatchFoundCallback): void {
+    this.onMatchFound = callback;
+    this.intervalId = setInterval(() => this.tryMatch(), 1000);
+    logger.info('Matchmaking service started');
   }
 
-  leave(playerId: string) {
-    this.queue = this.queue.filter((p) => p.playerId !== playerId);
+  stop(): void {
+    if (this.intervalId) clearInterval(this.intervalId);
+    this.intervalId = null;
   }
 
-  /**
-   * Attempt to form matches from the current queue.
-   * Returns arrays of 6 players ready to match.
-   */  
-  tryFormMatches(): QueuePlayer[][] {
-    const matches: QueuePlayer[][] = [];
-    const now = Date.now();
-
-    while (this.queue.length >= MAX_PLAYERS_PER_ROOM) {
-      // Sort by rating for closest matching
-      const sorted = [...this.queue].sort((a, b) => a.rating - b.rating);
-      
-      // Try to find 6 players within acceptable rating spread
-      for (let i = 0; i <= sorted.length - MAX_PLAYERS_PER_ROOM; i++) {
-        const group = sorted.slice(i, i + MAX_PLAYERS_PER_ROOM);
-        const ratingSpread = group[group.length - 1].rating - group[0].rating;
-        
-        // Calculate acceptable spread based on wait time
-        const waitTime = now - group[0].joinedAt;
-        const spreadMultiplier = 1 + Math.floor(waitTime / this.WIDEN_INTERVAL) * 0.5;
-        const acceptableSpread = this.RATING_SPREAD * spreadMultiplier;
-
-        if (ratingSpread <= acceptableSpread) {
-          matches.push(group);
-          // Remove matched players from queue
-          const matchedIds = new Set(group.map((p) => p.playerId));
-          this.queue = this.queue.filter((p) => !matchedIds.has(p.playerId));
-          break;
-        }
-      }
-      
-      // If no match found, break to avoid infinite loop
-      if (matches.length === 0 || this.queue.length < MAX_PLAYERS_PER_ROOM) break;
+  joinQueue(playerId: string, rating: number): void {
+    // Don't add if already in queue
+    if (this.queue.some((e) => e.playerId === playerId)) {
+      logger.warn(`Player ${playerId} already in queue`);
+      return;
     }
 
-    return matches;
+    this.queue.push({
+      playerId,
+      rating,
+      joinedAt: Date.now(),
+    });
+    logger.info(`Player ${playerId} (rating ${rating}) joined queue. Queue size: ${this.queue.length}`);
+  }
+
+  leaveQueue(playerId: string): void {
+    const before = this.queue.length;
+    this.queue = this.queue.filter((e) => e.playerId !== playerId);
+    if (this.queue.length < before) {
+      logger.info(`Player ${playerId} left queue. Queue size: ${this.queue.length}`);
+    }
+  }
+
+  private tryMatch(): void {
+    if (this.queue.length < TEAM_SIZE * 2) return;
+
+    const now = Date.now();
+
+    // Sort by rating for better matching
+    const sorted = [...this.queue].sort((a, b) => a.rating - b.rating);
+
+    // Try to find 6 players within skill band
+    for (let i = 0; i <= sorted.length - TEAM_SIZE * 2; i++) {
+      const group = sorted.slice(i, i + TEAM_SIZE * 2);
+      const ratingSpread = group[group.length - 1].rating - group[0].rating;
+
+      // Check if within skill band OR if any player has waited too long (widening)
+      const maxWait = Math.max(...group.map((g) => now - g.joinedAt));
+      const dynamicBand = SKILL_BAND + Math.min(maxWait * 5, 300); // Widen up to +300
+
+      if (ratingSpread <= dynamicBand) {
+        // Found a match!
+        const matchId = uuidv4();
+        const matchedPlayers = group;
+
+        // Remove from queue
+        const matchedIds = new Set(matchedPlayers.map((p) => p.playerId));
+        this.queue = this.queue.filter((e) => !matchedIds.has(e.playerId));
+
+        logger.info(`Match ${matchId} created. Players: ${matchedPlayers.map((p) => p.playerId).join(', ')}`);
+
+        if (this.onMatchFound) {
+          this.onMatchFound({ matchId, players: matchedPlayers });
+        }
+        return;
+      }
+    }
   }
 
   getQueueSize(): number {
     return this.queue.length;
   }
-}
 
-// ==================== GLICKO-2 RATING ====================
-
-export class Glicko2 {
-  private readonly RATING_DECAY = 0.5;
-  private readonly VOLATILITY = 0.06;
-
-  calculateNewRating(
-    playerRating: number,
-    playerRD: number,
-    opponentRating: number,
-    opponentRD: number,
-    score: number // 1 = win, 0 = loss, 0.5 = draw
-  ): { rating: number; rd: number } {
-    // Simplified Glicko-2 calculation
-    const g = (rd: number) => 1 / Math.sqrt(1 + (3 * rd ** 2) / (Math.PI ** 2));
-    const E = (rating: number, oppRating: number, oppRD: number) =>
-      1 / (1 + Math.exp(-g(oppRD) * (rating - oppRating) / 400));
-
-    const expectedScore = E(playerRating, opponentRating, opponentRD);
-    const variance =
-      g(opponentRD) ** 2 * expectedScore * (1 - expectedScore);
-    const improvement = (score - expectedScore) / variance;
-
-    const newRD = Math.sqrt(
-      1 / (1 / (playerRD ** 2) + 1 / variance)
-    );
-    const newRating = playerRating + newRD ** 2 * improvement;
-
-    return {
-      rating: Math.round(newRating),
-      rd: Math.round(newRD),
-    };
+  getQueuePosition(playerId: string): number {
+    return this.queue.findIndex((e) => e.playerId === playerId);
   }
 }
+
+export const matchmakingService = new MatchmakingService();

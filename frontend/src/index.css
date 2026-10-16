@@ -2,20 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+
 :root {
-  --kixoff-navy: #0A0E27;
-  --kixoff-cyan: #00F0FF;
-  --kixoff-magenta: #FF006E;
-  --kixoff-amber: #FFB800;
+  color-scheme: dark;
 }
 
 body {
+  @apply bg-kix-bg text-kix-text-primary font-body antialiased;
   margin: 0;
-  background-color: var(--kixoff-navy);
-  color: white;
-  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
 }
 
-h1, h2, h3, h4, h5, h6 {
-  font-family: 'Rajdhani', sans-serif;
+.neon-cyan { text-shadow: 0 0 10px #00F0FF, 0 0 20px #00F0FF80; }
+.neon-pink { text-shadow: 0 0 10px #FF006E, 0 0 20px #FF006E80; }
+.neon-gold { text-shadow: 0 0 10px #FFB800, 0 0 20px #FFB80080; }
+
+.glass-card {
+  @apply bg-kix-bg-card/80 backdrop-blur-md border border-white/5 rounded-2xl;
 }
+
+.btn-neon {
+  @apply px-6 py-3 rounded-xl font-display font-semibold text-lg transition-all;
+  @apply bg-gradient-to-r from-kix-cyan to-kix-cyan-dim text-kix-bg;
+  @apply hover:shadow-[0_0_30px_#00F0FF60] active:scale-95;
+}
+.btn-neon-pink {
+  @apply px-6 py-3 rounded-xl font-display font-semibold text-lg transition-all;
+  @apply bg-gradient-to-r from-kix-pink to-kix-pink-dim text-white;
+  @apply hover:shadow-[0_0_30px_#FF006E60] active:scale-95;
+}
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { @apply bg-kix-bg; }
+::-webkit-scrollbar-thumb { @apply bg-kix-cyan-dim rounded-full; }

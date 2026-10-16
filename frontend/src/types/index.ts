@@ -1,43 +1,98 @@
-// KIXoff shared types — used by both frontend and backend
+// ===== KIXoff Shared Types (mirrors backend) =====
 
 export type Team = 'home' | 'away';
 
-export type MatchPhase = 'waiting' | 'countdown' | 'playing' | 'goal-celebration' | 'ended';
+export interface Vec2 {
+  x: number;
+  y: number;
+}
 
-export interface Player {
+export interface PlayerSnapshot {
   id: string;
-  name: string;
   team: Team;
+  x: number;
+  y: number;
+  rot: number;
+  stamina: number;
+  hasBall: boolean;
+  stunned: boolean;
+}
+
+export interface BallSnapshot {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  ownerId: string | null;
+}
+
+export interface Snapshot {
+  matchId: string;
+  tick: number;
+  timeRemaining: number;
+  phase: 'countdown' | 'playing' | 'goal-celebration' | 'halftime' | 'ended';
+  homeScore: number;
+  awayScore: number;
+  players: PlayerSnapshot[];
+  ball: BallSnapshot;
+  lastEvent: GameEvent | null;
+}
+
+export interface GameEvent {
+  type: 'goal' | 'steal' | 'stun' | 'pass' | 'shot' | 'save' | 'kickoff';
+  timestamp: number;
+  playerId?: string;
+  team?: Team;
+  data?: Record<string, unknown>;
+}
+
+export interface PlayerInput {
+  seq: number;
+  moveX: number;
+  moveY: number;
+  action: 'none' | 'pass' | 'shoot' | 'tackle' | 'dash';
+  actionTarget?: Vec2;
+  timestamp: number;
+}
+
+export interface PlayerProfile {
+  id: string;
+  username: string;
   rating: number;
   level: number;
+  xp: number;
+  kredits: number;
+  gems: number;
+  stats: PlayerStats;
+  cosmetics: CosmeticLoadout;
 }
 
-export interface MatchResult {
-  matchId: string;
-  winner: Team | 'draw';
-  score: { home: number; away: number };
-  duration: number;
-  mvp: string;
-  players: Player[];
+export interface PlayerStats {
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+  goals: number;
+  assists: number;
+  saves: number;
+  tackles: number;
 }
 
-export interface RankTier {
-  name: string;
-  minRating: number;
-  maxRating: number;
-  color: string;
+export interface CosmeticLoadout {
+  skin: string;
+  trail: string;
+  goalEffect: string;
+  emotes: string[];
 }
 
-export const RANK_TIERS: RankTier[] = [
-  { name: 'Bronze',    minRating: 0,    maxRating: 1150, color: '#CD7F32' },
-  { name: 'Silver',    minRating: 1150, maxRating: 1350, color: '#C0C0C0' },
-  { name: 'Gold',      minRating: 1350, maxRating: 1550, color: '#FFD700' },
-  { name: 'Platinum',  minRating: 1550, maxRating: 1750, color: '#E5E4E2' },
-  { name: 'Diamond',   minRating: 1750, maxRating: 2000, color: '#00F0FF' },
-  { name: 'Master',    minRating: 2000, maxRating: 2300, color: '#FF006E' },
-  { name: 'Legend',    minRating: 2300, maxRating: 9999, color: '#FFB800' },
-];
-
-export function getRankFromRating(rating: number): RankTier {
-  return RANK_TIERS.find(t => rating >= t.minRating && rating < t.maxRating) || RANK_TIERS[0];
-}
+export type Screen =
+  | 'splash'
+  | 'main-menu'
+  | 'casual'
+  | 'ranked'
+  | 'matchmaking'
+  | 'loading'
+  | 'game'
+  | 'results'
+  | 'profile'
+  | 'shop'
+  | 'settings';

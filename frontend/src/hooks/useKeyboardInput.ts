@@ -1,61 +1,52 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 
-export interface KeyState {
-  up: boolean;
-  down: boolean;
-  left: boolean;
-  right: boolean;
-  kick: boolean;
-}
-
-const defaultState: KeyState = {
-  up: false,
-  down: false,
-  left: false,
-  right: false,
-  kick: false,
-};
-
-const keyMap: Record<string, keyof KeyState> = {
-  ArrowUp: 'up',
-  ArrowDown: 'down',
-  ArrowLeft: 'left',
-  ArrowRight: 'right',
-  KeyW: 'up',
-  KeyS: 'down',
-  KeyA: 'left',
-  KeyD: 'right',
-  Space: 'kick',
-};
-
-export function useKeyboardInput() {
-  const [keys, setKeys] = useState<KeyState>(defaultState);
+export function useKeyboardInput(
+  onInput: (input: { moveX: number; moveY: number; action: string }) => void
+) {
+  const keys = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
-    const handleDown = (e: KeyboardEvent) => {
-      const key = keyMap[e.code];
-      if (key) {
-        e.preventDefault();
-        setKeys((prev) => ({ ...prev, [key]: true }));
+    const down = (e: KeyboardEvent) => {
+      keys.current[e.key.toLowerCase()] = true;
+      handleAction(e.key.toLowerCase());
+    };
+    const up = (e: KeyboardEvent) => {
+      keys.current[e.key.toLowerCase()] = false;
+    };
+
+    const handleAction = (key: string) => {
+      const actions: Record<string, string> = {
+        ' ': 'shoot',
+        shift: 'pass',
+        e: 'tackle',
+        q: 'dash',
+      };
+      if (actions[key]) {
+        onInput({ moveX: 0, moveY: 0, action: actions[key] });
       }
     };
 
-    const handleUp = (e: KeyboardEvent) => {
-      const key = keyMap[e.code];
-      if (key) {
-        e.preventDefault();
-        setKeys((prev) => ({ ...prev, [key]: false }));
+    const poll = setInterval(() => {
+      let moveX = 0;
+      let moveY = 0;
+      if (keys.current['w'] || keys.current['arrowup']) moveY -= 1;
+      if (keys.current['s'] || keys.current['arrowdown']) moveY += 1;
+      if (keys.current['a'] || keys.current['arrowleft']) moveX -= 1;
+      if (keys.current['d'] || keys.current['arrowright']) moveX += 1;
+      const mag = Math.hypot(moveX, moveY);
+      if (mag > 0) {
+        moveX /= mag;
+        moveY /= mag;
       }
-    };
+      onInput({ moveX, moveY, action: 'none' });
+    }, 16);
 
-    window.addEventListener('keydown', handleDown);
-    window.addEventListener('keyup', handleUp);
-
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
     return () => {
-      window.removeEventListener('keydown', handleDown);
-      window.removeEventListener('keyup', handleUp);
+      clearInterval(poll);
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
     };
-  }, []);
-
-  return keys;
+  }, [onInput]);
 }
