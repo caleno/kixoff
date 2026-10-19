@@ -9,17 +9,15 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-io.use((socket, next) => {
-  authenticateSocket(socket.handshake.auth?.token as string | undefined);
-  next();
+io.on('connection', (socket) => {
+  if (!authenticateSocket(socket)) {
+    socket.disconnect(true);
+    return;
+  }
+  socket.on('input', () => undefined);
 });
 
-io.on('connection', (socket) => {
-  socket.emit('state', gameLoop.getState());
-});
+gameLoop({ step: () => ({ tick: 0, timestamp: Date.now(), state: { tick: 0, players: [], ball: { x: 0, y: 0 }, score: { home: 0, away: 0 } } }) } as any, (snapshot) => io.emit('snapshot', snapshot));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
-app.get('/', (_req, res) => res.json({ status: 'kixoff online' }));
-
-const port = Number(process.env.PORT || 3000);
-server.listen(port, () => console.log(`KIXoff listening on ${port}`));
+server.listen(process.env.PORT ?? 3000);
