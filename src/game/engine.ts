@@ -3,7 +3,6 @@ import type { GameState, Player, PlayerInput, Snapshot } from '../types';
 const FIELD_W = 800;
 const FIELD_H = 500;
 const PLAYER_R = 16;
-const BALL_R = 8;
 
 export class GameEngine {
   state: GameState;
@@ -58,7 +57,7 @@ export class GameEngine {
       phase: this.state.phase,
       score: { home: this.state.homeScore, away: this.state.awayScore },
       ball: { ...this.state.ball },
-      players: this.state.players.map((p) => ({ ...p })),
+      players: this.state.players.map((player) => ({ ...player })),
       lastEvent: this.state.lastEvent,
     };
   }
