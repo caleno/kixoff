@@ -1,16 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { colors } from '../types/design';
-import type { ServerSnapshot } from '../hooks/useGameSocket';
+import type { Snapshot } from '../types';
 
 /**
  * GameCanvas — WebGL/Canvas renderer for the arena
  * Aura (UI) — KIXoff
- *
- * Top-down view of the pitch with players, ball, and HUD overlay.
  */
 
 interface GameCanvasProps {
-  snapshot: ServerSnapshot | null;
+  snapshot: Snapshot | null;
   playerId: string;
 }
 
@@ -27,116 +25,84 @@ export function GameCanvas({ snapshot, playerId }: GameCanvasProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const render = () => {
-      // Clear
-      ctx.fillStyle = colors.base;
-      ctx.fillRect(0, 0, FIELD_W, FIELD_H);
-
-      // Draw field
-      drawField(ctx);
-
-      if (snapshot) {
-        // Draw ball
-        const { ball } = snapshot;
-        ctx.beginPath();
-        ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI * 2);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fill();
-        ctx.strokeStyle = colors.accent;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Draw players
-        for (const player of snapshot.players) {
-          const isMe = player.id === playerId;
-          const teamColor = player.team === 'home' ? colors.accent : colors.highlight;
-
-          // Glow for current player
-          if (isMe) {
-            ctx.shadowColor = teamColor;
-            ctx.shadowBlur = 20;
-          }
-
-          ctx.beginPath();
-          ctx.arc(player.x, player.y, PLAYER_R, 0, Math.PI * 2);
-          ctx.fillStyle = teamColor;
-          ctx.fill();
-          ctx.shadowBlur = 0;
-
-          // Name label
-          ctx.fillStyle = '#FFFFFF';
-          ctx.font = '10px Inter, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(player.name, player.x, player.y - PLAYER_R - 6);
-
-          // Stamina bar
-          const barW = 30;
-          const barH = 3;
-          const barX = player.x - barW / 2;
-          const barY = player.y + PLAYER_R + 4;
-          ctx.fillStyle = colors.baseLight;
-          ctx.fillRect(barX, barY, barW, barH);
-          ctx.fillStyle = player.stamina > 30 ? colors.success : colors.danger;
-          ctx.fillRect(barX, barY, barW * (player.stamina / 100), barH);
-        }
+      if (!snapshot) {
+        drawEmptyState(ctx);
+        return;
       }
 
-      animFrameRef.current = requestAnimationFrame(render);
+      const scale = Math.min(canvas.width / FIELD_W, canvas.height / FIELD_H);
+      const offsetX = (canvas.width - FIELD_W * scale) / 2;
+      const offsetY = (canvas.height - FIELD_H * scale) / 2;
+
+      ctx.save();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = colors.ink;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.translate(offsetX, offsetY);
+      ctx.scale(scale, scale);
+      drawPitch(ctx);
+
+      snapshot.players.forEach((p) => {
+        ctx.beginPath();
+        ctx.fillStyle = p.id === playerId ? colors.accent : colors.primary;
+        ctx.arc(p.position.x, p.position.y, PLAYER_R, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.beginPath();
+      ctx.fillStyle = colors.secondary;
+      ctx.arc(snapshot.ball.position.x, snapshot.ball.position.y, BALL_R, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
     };
 
-    render();
-
-    return () => {
-      cancelAnimationFrame(animFrameRef.current);
+    const frame = () => {
+      render();
+      animFrameRef.current = window.requestAnimationFrame(frame);
     };
+
+    animFrameRef.current = window.requestAnimationFrame(frame);
+    return () => window.cancelAnimationFrame(animFrameRef.current);
   }, [snapshot, playerId]);
 
-  return (
-    <canvas
-      ref={canvasRef}
-      width={FIELD_W}
-      height={FIELD_H}
-      style={{
-        borderRadius: '12px',
-        boxShadow: `0 0 40px ${colors.accent}20`,
-        maxWidth: '100%',
-        imageRendering: 'crisp-edges',
-      }}
-    />
-  );
+  return <canvas ref={canvasRef} width={960} height={600} className="w-full rounded-2xl border border-white/10 bg-black shadow-2xl" />;
 }
 
-function drawField(ctx: CanvasRenderingContext2D) {
-  // Field background
-  ctx.fillStyle = colors.fieldGreen;
+function drawEmptyState(ctx: CanvasRenderingContext2D) {
+  ctx.clearRect(0, 0, FIELD_W, FIELD_H);
+  ctx.fillStyle = colors.ink;
   ctx.fillRect(0, 0, FIELD_W, FIELD_H);
+  drawPitch(ctx);
+  ctx.fillStyle = colors.textMuted;
+  ctx.font = '600 20px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Waiting for match snapshot…', FIELD_W / 2, FIELD_H / 2);
+}
 
-  // Center line
-  ctx.strokeStyle = colors.fieldLine;
+function drawPitch(ctx: CanvasRenderingContext2D) {
+  ctx.strokeStyle = colors.line;
   ctx.lineWidth = 2;
+  ctx.strokeRect(0, 0, FIELD_W, FIELD_H);
   ctx.beginPath();
   ctx.moveTo(FIELD_W / 2, 0);
   ctx.lineTo(FIELD_W / 2, FIELD_H);
   ctx.stroke();
-
-  // Center circle
   ctx.beginPath();
   ctx.arc(FIELD_W / 2, FIELD_H / 2, 60, 0, Math.PI * 2);
   ctx.stroke();
-
-  // Goals
-  const goalY = (FIELD_H - GOAL_W) / 2;
-  ctx.strokeStyle = colors.accent;
-  ctx.lineWidth = 4;
+  const goalY = FIELD_H / 2 - GOAL_W / 2;
+  ctx.strokeStyle = colors.highlight;
   ctx.beginPath();
   ctx.moveTo(0, goalY);
   ctx.lineTo(0, goalY + GOAL_W);
   ctx.stroke();
-
-  ctx.strokeStyle = colors.highlight;
   ctx.beginPath();
   ctx.moveTo(FIELD_W, goalY);
   ctx.lineTo(FIELD_W, goalY + GOAL_W);
