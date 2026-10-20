@@ -29,9 +29,10 @@ export class GameLoop {
 
   start(): void {
     if (this.intervalId) return;
+
     this.intervalId = setInterval(() => {
+      this.tickCount += 1;
       this.engine.tick_step();
-      this.tickCount++;
 
       if (this.tickCount % BROADCAST_EVERY === 0) {
         this.broadcast(this.engine.getSnapshot());
@@ -40,8 +41,8 @@ export class GameLoop {
       if (this.engine.state.phase === 'ended') {
         this.stop();
         this.onEnd({
-          homeScore: this.engine.state.homeScore,
-          awayScore: this.engine.state.awayScore,
+          homeScore: this.engine.state.score.home,
+          awayScore: this.engine.state.score.away,
         });
       }
     }, TICK_MS);
