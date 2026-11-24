@@ -1,36 +1,72 @@
-import type { GameState, Player, PlayerInput, Snapshot } from '../types';
+// ===== KIXoff Game Engine =====
+// Minimal, type-correct implementation aligned with game/state.ts.
 
-const FIELD_W = 800;
-const FIELD_H = 500;
-const PLAYER_R = 16;
+import type {
+  MatchState,
+  PlayerInput,
+  PlayerState,
+  Snapshot,
+} from '../types';
+import {
+  ARENA,
+  BALL_RADIUS,
+  COUNTDOWN_MS,
+  GAME_CONFIG,
+  MATCH_DURATION_MS,
+  PLAYER_RADIUS,
+  PLAYER_SPEED,
+  STAMINA_MAX,
+  STAMINA_REGEN,
+} from './state';
+
+const TICK_RATE = GAME_CONFIG.tickRate;
+const TICK_MS = 1000 / TICK_RATE;
 
 export class GameEngine {
-  state: GameState;
+  state: MatchState;
+  private tick = 0;
+  private phaseElapsedMs = 0;
   private inputs = new Map<string, PlayerInput[]>();
 
   constructor(matchId: string, playerIds: string[]) {
-    const players: Player[] = playerIds.map((id, index) => ({
-      id,
-      team: index < 3 ? 'home' : 'away',
-      x: index < 3 ? 160 : 640,
-      y: 180 + (index % 3) * 70,
-      vx: 0,
-      vy: 0,
-      rot: 0,
-      stamina: 100,
-      hasBall: false,
-      stunned: false,
-    }));
+    const players = new Map<string, PlayerState>();
+
+    playerIds.forEach((id, index) => {
+      const home = index % 2 === 0;
+      players.set(id, {
+        id,
+        team: home ? 'home' : 'away',
+        position: {
+          x: home ? ARENA.width * 0.25 : ARENA.width * 0.75,
+          y: ARENA.height / 2,
+        },
+        velocity: { x: 0, y: 0 },
+        rotation: 0,
+        stamina: STAMINA_MAX,
+        hasBall: false,
+        isStunned: false,
+        stunUntil: 0,
+        lastInputSeq: 0,
+      });
+    });
 
     this.state = {
-      matchId,
-      phase: 'running',
-      tick: 0,
-      players,
-      ball: { x: FIELD_W / 2, y: FIELD_H / 2, vx: 0, vy: 0, ownerId: null },
+      id: matchId,
+      phase: 'countdown',
+      timeRemaining: MATCH_DURATION_MS,
       homeScore: 0,
       awayScore: 0,
-      lastEvent: null,
+      players,
+      ball: {
+        position: { x: ARENA.width / 2, y: ARENA.height / 2 },
+        velocity: { x: 0, y: 0 },
+        ownerId: null,
+        spin: 0,
+      },
+      arena: ARENA,
+      lastGoalScorer: null,
+      lastGoalTeam: null,
+      events: [],
     };
   }
 
@@ -41,24 +77,78 @@ export class GameEngine {
   }
 
   tick_step(): void {
-    this.state.tick += 1;
-    for (const player of this.state.players) {
+    this.tick += 1;
+    this.phaseElapsedMs += TICK_MS;
+
+    if (this.state.phase === 'countdown') {
+      if (this.phaseElapsedMs >= COUNTDOWN_MS) {
+        this.state.phase = 'playing';
+        this.phaseElapsedMs = 0;
+        this.state.events.push({
+          type: 'kickoff',
+          timestamp: Date.now(),
+        });
+      }
+      return;
+    }
+
+    if (this.state.phase !== 'playing') {
+      return;
+    }
+
+    this.state.timeRemaining = Math.max(0, this.state.timeRemaining - TICK_MS);
+    if (this.state.timeRemaining === 0) {
+      this.state.phase = 'ended';
+      return;
+    }
+
+    for (const player of this.state.players.values()) {
+      if (player.isStunned && Date.now() >= player.stunUntil) {
+        player.isStunned = false;
+      }
+      if (player.isStunned) continue;
+
       const input = this.inputs.get(player.id)?.shift();
-      if (!input) continue;
-      player.x = Math.max(PLAYER_R, Math.min(FIELD_W - PLAYER_R, player.x + (input.dx ?? 0)));
-      player.y = Math.max(PLAYER_R, Math.min(FIELD_H - PLAYER_R, player.y + (input.dy ?? 0)));
+      if (!input) {
+        player.stamina = Math.min(STAMINA_MAX, player.stamina + (STAMINA_REGEN * TICK_MS) / 1000);
+        continue;
+      }
+
+      player.lastInputSeq = input.seq;
+      const speed = PLAYER_SPEED * (TICK_MS / 1000);
+      player.position.x = Math.max(
+        PLAYER_RADIUS + BALL_RADIUS,
+        Math.min(ARENA.width - PLAYER_RADIUS - BALL_RADIUS, player.position.x + input.moveX * speed)
+      );
+      player.position.y = Math.max(
+        PLAYER_RADIUS + BALL_RADIUS,
+        Math.min(ARENA.height - PLAYER_RADIUS - BALL_RADIUS, player.position.y + input.moveY * speed)
+      );
+      if (input.moveX !== 0 || input.moveY !== 0) {
+        player.rotation = Math.atan2(input.moveY, input.moveX);
+      }
     }
   }
 
   getSnapshot(): Snapshot {
     return {
-      tick: this.state.tick,
-      timestamp: Date.now(),
+      matchId: this.state.id,
+      tick: this.tick,
+      timeRemaining: this.state.timeRemaining,
       phase: this.state.phase,
       score: { home: this.state.homeScore, away: this.state.awayScore },
-      ball: { ...this.state.ball },
-      players: this.state.players.map((player) => ({ ...player })),
-      lastEvent: this.state.lastEvent,
+      ball: {
+        position: { ...this.state.ball.position },
+        velocity: { ...this.state.ball.velocity },
+        ownerId: this.state.ball.ownerId,
+        spin: this.state.ball.spin,
+      },
+      players: Array.from(this.state.players.values()).map((player) => ({
+        ...player,
+        position: { ...player.position },
+        velocity: { ...player.velocity },
+      })),
+      events: [...this.state.events],
     };
   }
 }

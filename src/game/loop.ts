@@ -1,5 +1,7 @@
+// ===== KIXoff Game Loop — 60Hz tick, 20Hz broadcast =====
+
 import { GameEngine } from './engine';
-import type { Snapshot } from '../types';
+import type { PlayerInput, Snapshot } from '../types';
 
 const TICK_RATE = 60;
 const BROADCAST_RATE = 20;
@@ -41,8 +43,8 @@ export class GameLoop {
       if (this.engine.state.phase === 'ended') {
         this.stop();
         this.onEnd({
-          homeScore: this.engine.state.score.home,
-          awayScore: this.engine.state.score.away,
+          homeScore: this.engine.state.homeScore,
+          awayScore: this.engine.state.awayScore,
         });
       }
     }, TICK_MS);
@@ -55,7 +57,7 @@ export class GameLoop {
     }
   }
 
-  queueInput(playerId: string, input: any): void {
+  queueInput(playerId: string, input: PlayerInput): void {
     this.engine.queueInput(playerId, input);
   }
 

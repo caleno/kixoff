@@ -17,7 +17,6 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@shared/*": ["src/shared/*"],
       "@game/*": ["src/game/*"],
       "@components/*": ["frontend/src/components/*"],
       "@hooks/*": ["frontend/src/hooks/*"],
