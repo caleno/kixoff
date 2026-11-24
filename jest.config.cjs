@@ -1,10 +1,11 @@
-// Jest configuration for KIXoff backend
-import type { Config } from 'jest';
+// CommonJS Jest config (repo is "type": "module", so .cjs keeps require/module.exports valid).
 
-const config: Config = {
+/** @type {import('jest').Config} */
+module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   roots: ['<rootDir>/src/__tests__'],
+  testMatch: ['**/__tests__/**/*.test.ts'],
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',
@@ -24,5 +25,3 @@ const config: Config = {
     '^.+\\.ts$': 'ts-jest',
   },
 };
-
-export default config;

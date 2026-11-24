@@ -41,6 +41,10 @@ export interface MatchState {
   events: GameEvent[];
 }
 
+// Convenience aliases used across the codebase
+export type GameState = MatchState;
+export type Player = PlayerState;
+
 export interface ArenaConfig {
   width: number;
   height: number;
@@ -72,36 +76,51 @@ export interface Snapshot {
   tick: number;
   timeRemaining: number;
   phase: MatchState['phase'];
-  homeScore: number;
-  awayScore: number;
-  players: Array<{
-    id: string;
-    team: Team;
-    x: number;
-    y: number;
-    rot: number;
-    stamina: number;
-    hasBall: boolean;
-    stunned: boolean;
-  }>;
-  ball: { x: number; y: number; vx: number; vy: number; ownerId: string | null };
-  lastEvent: GameEvent | null;
+  score: { home: number; away: number };
+  ball: BallState;
+  players: PlayerState[];
+  events: GameEvent[];
 }
 
-// ===== Arena Constants =====
+export interface GameConfig {
+  tickRate: number;
+  broadcastRate: number;
+  matchDurationMs: number;
+  countdownMs: number;
+  goalCelebrationMs: number;
+}
+
+export interface MatchResult {
+  matchId: string;
+  homeScore: number;
+  awayScore: number;
+  winner: Team | null;
+  durationMs: number;
+}
+
+// ===== Game Constants =====
+
 export const ARENA: ArenaConfig = {
   width: 800,
   height: 500,
-  goalWidth: 120,
-  goalDepth: 30,
-  wallBounce: 0.7,
-  friction: 0.92,
+  goalWidth: 140,
+  goalDepth: 40,
+  wallBounce: 0.85,
+  friction: 0.98,
 };
 
-export const PLAYER_RADIUS = 14;
-export const BALL_RADIUS = 8;
-export const PLAYER_SPEED = 180; // pixels per second
-export const PLAYER_DASH_SPEED = 320;
+export const GAME_CONFIG: GameConfig = {
+  tickRate: 60,
+  broadcastRate: 20,
+  matchDurationMs: 180000,
+  countdownMs: 3000,
+  goalCelebrationMs: 2500,
+};
+
+export const PLAYER_RADIUS = 16;
+export const BALL_RADIUS = 10;
+export const PLAYER_SPEED = 220;
+export const PLAYER_DASH_SPEED = 420;
 export const DASH_DURATION_MS = 200;
 export const DASH_COOLDOWN_MS = 2000;
 export const STUN_DURATION_MS = 1000;
