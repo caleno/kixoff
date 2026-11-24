@@ -121,9 +121,9 @@ matchmakingService.start(({ matchId, players }) => {
       socket.join(matchId);
       socket.emit('match_found', { matchId, players: ids });
     } else {
-      // Human went offline mid-queue: replace with a bot so the match can proceed
+      // Human went offline mid-queue: mark for future bot substitution.
+      // TODO(bot-substitution): replace offline humans with bots in liveMatches.
       const botId = `bot-${uuidv4().slice(0, 8)}`;
-      match replacement happens below in practice via playerIds — see note.
       void botId;
     }
   }
@@ -186,18 +186,15 @@ io.on('connection', (socket: Socket) => {
         matchmakingService.leaveQueue(playerId);
       }
     }
-    // If their match loses all humans, end it
-    for (const [playerId, matchId] of playerMatch) {
-      void playerId;
-      void matchId;
-    }
-    // Find matches whose human sockets are all gone
+    // End matches whose human sockets are all gone
     for (const [matchId, match] of liveMatches) {
-      const humansPresent = match.humanIds.size === 0 || [...io.sockets.adapter.rooms.get(matchId) ?? []].length > 0;
-      if (!humansPresent && match.loop.getEngine().getSnapshot ? false : false) {
-        /* unreachable placeholder */
+      const roomSize = io.sockets.adapter.rooms.get(matchId)?.size ?? 0;
+      if (match.humanIds.size > 0 && roomSize === 0) {
+        match.loop.stop();
+        for (const pid of match.playerIds) playerMatch.delete(pid);
+        liveMatches.delete(matchId);
+        logger.info(`Match ${matchId} ended: all humans disconnected`);
       }
-      void humansPresent;
     }
   });
 });
