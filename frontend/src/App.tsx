@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { SplashScreen } from './components/SplashScreen';
 import { MainMenu } from './components/MainMenu';
-import { MatchmakingScreen } from './components/MatchmakingScreen';
-import { GameScreen } from './components/GameScreen';
-import { ResultsScreen } from './components/ResultsScreen';
+import { MatchFlow } from './components/MatchFlow';
 import type { Screen, PlayerProfile } from './types';
 
 export default function App() {
@@ -11,10 +9,11 @@ export default function App() {
   const [player, setPlayer] = useState<PlayerProfile | null>(null);
 
   useEffect(() => {
-    setTimeout(() => {
+    // Placeholder profile until accounts/auth land; rating feeds matchmaking.
+    const t = setTimeout(() => {
       setPlayer({
-        id: 'mock-1',
-        username: 'Nordlys',
+        id: 'guest',
+        username: 'Guest',
         rating: 1500,
         level: 1,
         xp: 0,
@@ -25,6 +24,7 @@ export default function App() {
       });
       setScreen('main-menu');
     }, 2500);
+    return () => clearTimeout(t);
   }, []);
 
   const navigate = (s: Screen) => setScreen(s);
@@ -33,13 +33,14 @@ export default function App() {
     case 'splash':
       return <SplashScreen />;
     case 'main-menu':
-      return <MainMenu player={player!} navigate={navigate} />;
+      return player ? <MainMenu player={player} navigate={navigate} /> : <SplashScreen />;
     case 'matchmaking':
-      return <MatchmakingScreen player={player!} navigate={navigate} />;
-    case 'game':
-      return <GameScreen navigate={navigate} />;
-    case 'results':
-      return <ResultsScreen navigate={navigate} />;
+      // MatchFlow handles matchmaking -> game -> results and its own socket lifecycle.
+      return player ? (
+        <MatchFlow player={player} onExit={() => setScreen('main-menu')} />
+      ) : (
+        <SplashScreen />
+      );
     default:
       return <SplashScreen />;
   }
