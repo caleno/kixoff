@@ -10,6 +10,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# NOTE: There is no package-lock.json committed yet (root or frontend/).
+# Until lockfiles are committed:
+#   - do not use `cache: 'npm'` (setup-node errors: "Dependencies lock file is not found")
+#   - use `npm install` instead of `npm ci`
+# Once lockfiles land, restore cache + npm ci for reproducible installs.
+
 jobs:
   # ──────────────────────────────────────────────
   # Lint & Type Check
@@ -24,10 +30,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          # cache: 'npm'  # re-enable once package-lock.json is committed
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Type check
         run: npx tsc --noEmit
@@ -50,10 +56,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          # cache: 'npm'  # re-enable once package-lock.json is committed
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Run tests
         run: npm test -- --coverage --verbose
@@ -79,15 +85,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+          # cache: 'npm'  # re-enable once package-lock.json is committed
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build
         run: npm run build
 
       - name: Upload build artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-dist
@@ -107,8 +114,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          # No frontend lockfile yet — fall back to root cache config.
+          # cache: 'npm'  # re-enable once frontend/package-lock.json is committed
 
       - name: Install frontend dependencies
         run: cd frontend && npm install
@@ -117,6 +123,7 @@ jobs:
         run: cd frontend && npm run build
 
       - name: Upload frontend build
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
@@ -136,8 +143,15 @@ jobs:
       - uses: actions/checkout@v4
 
       # Blocking: HIGH or CRITICAL vulnerabilities fail the pipeline.
+      # npm audit requires a lockfile; skip gracefully (and warn) until one is committed,
+      # then remove the fallback so the gate blocks again.
       - name: Run npm audit
-        run: npm audit --audit-level=high
+        run: |
+          if [ -f package-lock.json ]; then
+            npm audit --audit-level=high
+          else
+            echo "::warning::No package-lock.json found — skipping npm audit. Commit a lockfile to enable this gate."
+          fi
 
       # Advisory: results uploaded to Security tab; findings do not fail CI.
       - name: Run Trivy filesystem scan
