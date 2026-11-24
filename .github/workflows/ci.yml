@@ -6,6 +6,10 @@ on:
   push:
     branches: [main, develop]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ──────────────────────────────────────────────
   # Lint & Type Check
@@ -28,8 +32,10 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
-      - name: Lint
-        run: npx eslint src/ --ext .ts 2>/dev/null || echo "ESLint not configured yet — skipping"
+      # ESLint is not installed yet — once it is, replace this with `npm run lint`.
+      # The gate stays meaningful because tsc --noEmit above must pass.
+      - name: Lint (placeholder until ESLint is configured)
+        run: echo "ESLint not configured yet — tsc --noEmit serves as the lint gate"
 
   # ──────────────────────────────────────────────
   # Unit Tests
@@ -102,10 +108,10 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          # No frontend lockfile yet — fall back to root cache config.
 
       - name: Install frontend dependencies
-        run: cd frontend && npm ci || npm install
+        run: cd frontend && npm install
 
       - name: Build frontend
         run: cd frontend && npm run build
@@ -129,9 +135,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Blocking: HIGH or CRITICAL vulnerabilities fail the pipeline.
       - name: Run npm audit
-        run: npm audit --audit-level=moderate || true
+        run: npm audit --audit-level=high
 
+      # Advisory: results uploaded to Security tab; findings do not fail CI.
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@master
         with:
